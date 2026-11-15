@@ -2,6 +2,13 @@
 
 use PHPUnit\Framework\TestCase;
 
+if (!class_exists('EA_Controller', false)) {
+    class EA_Controller {}
+}
+
+require_once APPPATH . 'controllers/Console.php';
+require_once APPPATH . 'libraries/Instance.php';
+
 final class InstanceSeedPasswordTest extends TestCase
 {
     public function testNormalAdministratorPasswordsAreRandomStrongAndDistinct(): void
@@ -36,8 +43,11 @@ final class InstanceSeedPasswordTest extends TestCase
         $method = $reflection->getMethod('installFixtureArgument');
         $method->setAccessible(true);
 
-        self::assertNull($method->invoke($console, ['index.php', 'console', 'install']));
-        self::assertSame('fixture', $method->invoke($console, ['index.php', 'console', 'install', 'fixture']));
+        self::assertNull($method->invoke($console, ['index.php', 'console', 'install'], 'production'));
+        self::assertSame(
+            'fixture',
+            $method->invoke($console, ['index.php', 'console', 'install', 'fixture'], 'testing'),
+        );
 
         $this->expectException(InvalidArgumentException::class);
         $method->invoke($console, ['index.php', 'console', 'install', 'fixture', 'extra']);
@@ -52,5 +62,16 @@ final class InstanceSeedPasswordTest extends TestCase
         self::assertNotFalse($validation);
         self::assertNotFalse($migration);
         self::assertLessThan($migration, $validation);
+    }
+
+    public function testProductionRejectsDeterministicFixture(): void
+    {
+        $reflection = new ReflectionClass(Console::class);
+        $console = $reflection->newInstanceWithoutConstructor();
+        $method = $reflection->getMethod('installFixtureArgument');
+        $method->setAccessible(true);
+
+        $this->expectException(InvalidArgumentException::class);
+        $method->invoke($console, ['index.php', 'console', 'install', 'fixture'], 'production');
     }
 }

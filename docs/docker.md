@@ -314,7 +314,7 @@ docker compose \
   -f docker-compose.yml \
   -f docker/compose.ci-local.yml \
   -f docker/compose.php85-smoke.yml \
-  run --rm php-fpm php index.php console install fixture
+  run --rm -e APP_ENV=testing php-fpm php index.php console install fixture
 
 COMPOSE_PROJECT_NAME=fh-php85-smoke \
 EA_MYSQL_DATA_PATH=/private/tmp/fh-php85-smoke-mysql \

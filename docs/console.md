@@ -65,7 +65,7 @@ test credentials, pass the explicit `fixture` argument. Normal installations
 generate a unique administrator password and print it once for the operator.
 
 ```bash
-php index.php console install fixture
+APP_ENV=testing php index.php console install fixture
 ```
 
 This command prepares a local or CI test instance. Use the explicit `fixture` argument above when known fixture credentials are required.

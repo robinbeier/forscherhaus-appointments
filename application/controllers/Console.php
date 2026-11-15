@@ -69,9 +69,13 @@ class Console extends EA_Controller
      *
      * @param array<int, mixed> $arguments CLI argv values.
      */
-    private function installFixtureArgument(array $arguments): ?string
+    private function installFixtureArgument(array $arguments, ?string $environment = null): ?string
     {
         $fixture = $arguments[3] ?? null;
+
+        if ($fixture === 'fixture' && ($environment ?? ENVIRONMENT) !== 'testing') {
+            throw new InvalidArgumentException('The deterministic install fixture is available only in testing.');
+        }
 
         if (($fixture !== null && $fixture !== 'fixture') || array_key_exists(4, $arguments)) {
             throw new InvalidArgumentException('Console install accepts only the optional fixture argument.');

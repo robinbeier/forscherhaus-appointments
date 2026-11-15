@@ -376,8 +376,8 @@ class CiDockerComposeHelpersTest extends TestCase
             if ci_docker_install_seed_instance test exec -T php-fpm php index.php console install; then
               exit 1
             fi
-            grep -Fqx 'test exec -T php-fpm php index.php console install fixture' "$args_file"
-            exit 1
+            grep -Fqx 'test exec -T php-fpm env APP_ENV=testing php index.php console install fixture' "$args_file"
+            test "$(cat "$attempt_file")" = '3'
             BASH
             ,
             '',

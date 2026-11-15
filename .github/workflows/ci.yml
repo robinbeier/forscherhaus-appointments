@@ -491,7 +491,7 @@ jobs:
             composer install --no-interaction --no-progress
             test ! -e config.php
             install -m 0600 config-sample.php config.php
-            php index.php console install fixture
+            APP_ENV=testing php index.php console install fixture
             # Keep later per-suite evidence after an earlier test failure.
             suite_status=0
             APP_ENV=testing php -d memory_limit=512M vendor/bin/phpunit \
@@ -619,7 +619,7 @@ jobs:
         run: |
           python3 -B scripts/ci/run_gate_with_summary.py --label build-test-6 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           for attempt in 1 2 3; do
-            if php index.php console install fixture; then
+            if APP_ENV=testing php index.php console install fixture; then
               exit 0
             fi
             echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
@@ -1129,7 +1129,7 @@ jobs:
           grep -Fq "const BASE_URL = 'http://127.0.0.1:8080';" config.php
           grep -Fq "const DB_HOST = '127.0.0.1';" config.php
           for attempt in 1 2 3; do
-            if php index.php console install fixture; then
+            if APP_ENV=testing php index.php console install fixture; then
               exit 0
             fi
             echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
@@ -1343,7 +1343,7 @@ jobs:
         run: |
           python3 -B scripts/ci/run_gate_with_summary.py --label coverage-shard-integration-5 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
           for attempt in 1 2 3; do
-            if php index.php console install fixture; then
+            if APP_ENV=testing php index.php console install fixture; then
               exit 0
             fi
             echo "::warning::console install failed on attempt ${attempt}; retrying in 3s." >&2
