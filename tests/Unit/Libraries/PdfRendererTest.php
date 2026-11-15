@@ -200,6 +200,12 @@ class PdfRendererTest extends TestCase
     {
         $renderer = $this->createFlowRenderer([
             'http://primary.example:3000' => new RuntimeException('primary unavailable'),
+            'http://127.0.0.1:3003' => '%PDF-implicit-leak',
+            'http://localhost:3003' => '%PDF-implicit-leak',
+        ]);
+        $renderer->configureResolvedEndpoints([
+            'base_url' => 'http://primary.example:3000',
+            'fallback_urls' => [],
         ]);
 
         try {
@@ -269,6 +275,16 @@ class PdfRendererTest extends TestCase
                 $this->defaultOrientation = 'portrait';
                 $this->defaultMargin = [];
                 $this->defaultWaitFor = null;
+            }
+
+            public function configureResolvedEndpoints(array $config): void
+            {
+                $this->endpoints = $this->resolveEndpoints($config);
+            }
+
+            protected function isContainerRuntime(): bool
+            {
+                return false;
             }
 
             protected function callRenderer(string $endpoint, array $payload, bool $isPrimary = false): string
