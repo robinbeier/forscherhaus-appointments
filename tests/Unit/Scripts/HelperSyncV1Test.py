@@ -10,6 +10,15 @@ SPEC = importlib.util.spec_from_file_location('helper_sync_v1', Path(__file__).p
 mod = importlib.util.module_from_spec(SPEC); SPEC.loader.exec_module(mod)
 
 class HelperSyncV1Test(unittest.TestCase):
+    def test_production_new_pin_matches_tracked_deploy_helper(self):
+        # setUp replaces the module pins with synthetic fixture values for
+        # transactional tests; load a fresh module to inspect production constants.
+        fresh = importlib.util.module_from_spec(SPEC)
+        SPEC.loader.exec_module(fresh)
+        tracked_helper = Path(__file__).parents[3] / 'deploy_ea.sh'
+        self.assertEqual(fresh.sha256(tracked_helper), fresh.NEW_SHA256)
+        self.assertEqual(tracked_helper.stat().st_size, fresh.NEW_SIZE)
+
     def setUp(self):
         self.real_euid = mod.os.geteuid; mod.os.geteuid = lambda: 0
         self.tmp = tempfile.TemporaryDirectory(dir='/root' if self.real_euid() == 0 else None)

@@ -179,11 +179,27 @@ The following remains the direct-path example after those gates:
 ```bash
 /root/deploy_ea.sh \
   --rel ea_YYYYMMDD_HHMM \
+  --archive-sha256 "$ARCHIVE_SHA256" \
   --healthz-token-file /etc/fh/healthz.token \
   --zero-surprise-dump-file /path/to/easyappointments.sql.gz \
   --zero-surprise-predeploy-credentials-file /etc/fh/zero-surprise-predeploy.ini \
   --zero-surprise-canary-credentials-file /etc/fh/zero-surprise-canary.ini \
   --zero-surprise-incident-webhook-file /etc/fh/zero-surprise-incident-webhook.ini
+```
+
+The archive digest is independently calculated from the exact uploaded archive
+before this command is started. The helper verifies it before extraction and
+uses a separate protected snapshot for the staged validator and deployment.
+
+To inspect the planned path without changing production, use the same release
+and digest with `--dry-run`:
+
+```bash
+/root/deploy_ea.sh \
+  --dry-run \
+  --rel ea_YYYYMMDD_HHMM \
+  --src /root/releases \
+  --archive-sha256 "$ARCHIVE_SHA256"
 ```
 
 For a direct invocation, also pass `--result-file "$DEPLOY_RESULT_FILE"` with

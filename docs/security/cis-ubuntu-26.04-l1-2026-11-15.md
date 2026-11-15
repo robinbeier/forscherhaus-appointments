@@ -11,10 +11,10 @@ This is an evidence ledger and hardening status report, not a CIS certification 
 | Status | Count |
 | --- | ---: |
 | Observed pass | 181 |
-| Observed open | 62 |
+| Observed open | 64 |
 | Accepted exception | 7 |
 | Not applicable | 21 |
-| Unassessed | 2 |
+| Unassessed | 0 |
 
 The observations are point-in-time. They do not prove reboot persistence, future configuration state, or that the currently running application is the latest repository revision. Any host mutation, release change, package update, or configuration drift requires a fresh assessment.
 
@@ -35,7 +35,7 @@ The observations are point-in-time. They do not prove reboot persistence, future
 - World-writable directories in inactive staging/quarantine areas remain open until they are removed, isolated, or explicitly dispositioned.
 - IPv6 redirect/router-advertisement and related network-policy controls remain open where shown by the ledger.
 - PAM/password, bootloader, and other reboot- or policy-dependent controls remain open where not independently verified.
-- The two unassessed controls are **1.1.1.11** (unused filesystem kernel modules) and **2.1.23** (only approved services listening on a network interface). They require explicit evidence rather than inference from neighbouring checks.
+- **1.1.1.11** (unused filesystem kernel modules) is open: the 15:36 UTC inventory found installed filesystem modules beyond those currently mounted or loaded, and the host has no approved per-module need list. **2.1.23** (only approved services listening on a network interface) is also open: the 15:35 UTC listener inventory found the expected web, SSH, local service, and Tailscale classes, but there is no approved host-specific service and interface allowlist. These observations resolve the earlier lack of inventory; they do not establish compliance or justify disabling a module or listener.
 
 The narrow, user-authorised host changes already observed (for example, dumpability, SSH retry/keepalive, and IPv4 redirect settings) must still be rechecked after the next controlled change and after reboot before being counted as persistent hardening.
 
@@ -56,6 +56,6 @@ Neither application exception should be described as fixed or as evidence of hos
 2. Rehearse the pending application migrations and deployment separately from host changes; do not infer production readiness from repository state while the old release is active.
 3. Establish a trusted, root-owned AIDE baseline and daily verification only after the backup/restore and alerting path is independently verified.
 4. Reassess `/tmp` and `/dev/shm` `noexec` compatibility and reboot persistence before enabling them.
-5. Resolve the two unassessed controls with direct evidence, then rerun the complete CIS ledger and a final Daybreak scan on the exact release intended for production.
+5. Obtain explicit host-specific module and listener allowlists for the two manual controls, then rerun the complete CIS ledger and a final Daybreak scan on the exact release intended for production.
 
 The final scan must distinguish validated findings from provisional or validation-warning output. A non-empty scan response, a green service check, or a source-level fix alone is not proof of payload safety, persistence, confidentiality, or production deployment.

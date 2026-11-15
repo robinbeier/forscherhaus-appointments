@@ -275,6 +275,10 @@ final class DeployStableResultTest extends TestCase
         }
         $result = '/root/fh-bound-entry-result-' . getmypid() . '.json';
         $trustedScript = '/root/fh-bound-entry-deploy-' . getmypid() . '.sh';
+        $release = 'ea_guard_full_entry_' . getmypid();
+        $archive = '/root/' . $release . '.tar.gz';
+        file_put_contents($archive, "synthetic archive\n");
+        $archiveSha256 = hash_file('sha256', $archive);
         $trustedScriptIdentity = null;
         try {
             $sourceScript = dirname(__DIR__, 3) . '/deploy_ea.sh';
@@ -311,7 +315,11 @@ final class DeployStableResultTest extends TestCase
                 'bash',
                 $trustedScript,
                 '--rel',
-                'ea_guard_full_entry_' . getmypid(),
+                $release,
+                '--src',
+                '/root',
+                '--archive-sha256',
+                $archiveSha256,
                 '--result-file',
                 $result,
                 '--reload',
@@ -330,6 +338,7 @@ final class DeployStableResultTest extends TestCase
             );
             self::assertFileDoesNotExist($result);
         } finally {
+            @unlink($archive);
             $currentGuard = @lstat($guard);
             if (
                 is_array($guardIdentity) &&
@@ -583,6 +592,9 @@ final class DeployStableResultTest extends TestCase
             throw $error;
         }
         $trustedScript = '/root/fh-canary-entry-deploy-' . getmypid() . '.sh';
+        $archive = '/root/' . $release . '.tar.gz';
+        file_put_contents($archive, "synthetic archive\n");
+        $archiveSha256 = hash_file('sha256', $archive);
         $trustedScriptIdentity = null;
         $stateIdentity = null;
         try {
@@ -611,6 +623,10 @@ final class DeployStableResultTest extends TestCase
                 $trustedScript,
                 '--rel',
                 $release,
+                '--src',
+                '/root',
+                '--archive-sha256',
+                $archiveSha256,
                 '--result-file',
                 $result,
                 '--reload',
@@ -632,6 +648,7 @@ final class DeployStableResultTest extends TestCase
             self::assertDirectoryDoesNotExist($stage);
             self::assertDirectoryDoesNotExist($previous);
         } finally {
+            @unlink($archive);
             $currentState = @lstat($state);
             if (
                 is_array($stateIdentity) &&
@@ -1540,7 +1557,11 @@ final class DeployStableResultTest extends TestCase
 
         $script = <<<'BASH'
         set -eu
-        fixture="$(mktemp -d)"
+        if [[ "$(id -u)" == "0" ]]; then
+          fixture="$(mktemp -d /root/deploy-pre-switch.XXXXXX)"
+        else
+          fixture="$(mktemp -d)"
+        fi
         trap 'rm -rf "$fixture"' EXIT
         mkdir -p "$fixture/missing/application" "$fixture/valid/application/config" "$fixture/live"
         printf 'placeholder\n' > "$fixture/missing/application/readme.txt"
@@ -1563,6 +1584,8 @@ final class DeployStableResultTest extends TestCase
           PREV="$fixture/previous-$label"
           STAGE="$stage"
           DRYRUN=0
+          ARCHIVE_SHA256="$(sha256sum -- "$archive" | awk '{print $1}')"
+          BOUND_ARCHIVE="$stage.archive-bound.tar.gz"
           REQUIRE_ZERO_SURPRISE=0
           require_command() { :; }
           initialize_service_control() { :; }

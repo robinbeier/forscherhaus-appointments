@@ -78,6 +78,10 @@ class BoundReleaseDeployTest(unittest.TestCase):
         self.child.assert_called_once()
         command = self.child.call_args.args[0]
         self.assertEqual(MODULE.DEPLOY, command[0])
+        self.assertEqual(
+            arguments().archive_sha,
+            command[command.index('--archive-sha256') + 1],
+        )
         self.assertEqual('/private/synthetic.sql.gz', command[command.index('--zero-surprise-dump-file') + 1])
         self.assertEqual(arguments().run_id, self.child.call_args.kwargs['env']['BOUND_RELEASE_RUN_ID'])
         self.assertEqual(1, self.reserve.call_count)

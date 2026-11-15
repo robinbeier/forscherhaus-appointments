@@ -45,6 +45,9 @@ RECOVERY_GUARD='/root/fh-deploy-recovery-pending.v1.json'
 ZERO_SURPRISE_CANARY_ACTIVE_STATE_FILE='/var/lib/fh-zero-surprise-canary/active.json'
 ZERO_SURPRISE_CANARY_CLEANUP_TIMER='fh-zero-surprise-canary-cleanup.timer'
 ZERO_SURPRISE_CANARY_CLEANUP_SERVICE='fh-zero-surprise-canary-cleanup.service'
+ARCHIVE_SHA256=""
+BOUND_ARCHIVE=""
+BOUND_ARCHIVE_CREATED=0
 
 RENDERER_HEALTH_RETRIES=15
 RENDERER_HEALTH_SLEEP_SECONDS=2
@@ -881,8 +884,18 @@ deploy_result_normalize_exit_code() {
   esac
 }
 
+cleanup_bound_archive() {
+  if [[ "${BOUND_ARCHIVE_CREATED:-0}" == "1" && -n "${BOUND_ARCHIVE:-}" \
+    && -f "$BOUND_ARCHIVE" && ! -L "$BOUND_ARCHIVE" ]]; then
+    rm -f -- "$BOUND_ARCHIVE" || true
+  fi
+  BOUND_ARCHIVE_CREATED=0
+}
+
 deploy_result_on_signal() {
   local signal_exit_code="${1:-143}"
+
+  cleanup_bound_archive
 
   if [[ "${DEPLOY_RESULT_EXIT_FINALIZATION_ACTIVE:-0}" == "1" \
     || "${DEPLOY_RESULT_RECEIPT_FINALIZATION_ACTIVE:-0}" == "1" ]]; then
@@ -954,6 +967,7 @@ deploy_result_finish() {
     return 1
   fi
   trap - EXIT
+  cleanup_bound_archive
   deploy_result_after_finalize || true
   deploy_result_exit "$exit_code"
 }
@@ -961,6 +975,8 @@ deploy_result_finish() {
 deploy_result_on_exit() {
   local raw_exit_code="$?"
   local exit_code
+
+  cleanup_bound_archive
 
   DEPLOY_RESULT_EXIT_FINALIZATION_ACTIVE=1
   deploy_result_reconcile_switch_phase
@@ -1084,6 +1100,7 @@ Required:
 Core options:
   --app PATH                   Live app path                     [default: /var/www/html/easyappointments]
   --src DIR                    Directory with release archive     [default: /root/releases]
+  --archive-sha256 HEX64       Independently pinned archive digest [required for non-dry deploy]
   --user WEBUSER               Web user for ownership/actions     [default: www-data]
   --reload LIST                Services to reload (CSV)           [default: <detected php-fpm>]
   --result-file PATH           Publish durable deploy_result.v1 candidate
@@ -1222,6 +1239,49 @@ validate_deploy_script_drift() {
 
   cmp -s "$CURRENT_SCRIPT_PATH" "$stage_deploy_script" \
     || die "[!] Host deploy script drift detected: '$CURRENT_SCRIPT_PATH' does not match '$stage_deploy_script'. Sync the host deploy script from the merged repo before deploying."
+}
+
+bind_archive_snapshot() {
+  if [[ "$DRYRUN" -eq 1 ]]; then
+    echo "[DRY-RUN] bind archive '$ARCHIVE' to '$BOUND_ARCHIVE' and verify SHA-256 '$ARCHIVE_SHA256'"
+    return 0
+  fi
+
+  [[ "$ARCHIVE_SHA256" =~ ^[a-f0-9]{64}$ ]] \
+    || die "[!] --archive-sha256 must be a lowercase 64-character SHA-256 digest."
+  [[ -f "$ARCHIVE" && ! -L "$ARCHIVE" ]] \
+    || die "[!] Archive must be a regular non-symlink file: $ARCHIVE"
+  [[ -n "$BOUND_ARCHIVE" && ! -e "$BOUND_ARCHIVE" && ! -L "$BOUND_ARCHIVE" ]] \
+    || die "[!] Bound archive target already exists or is unavailable: $BOUND_ARCHIVE"
+  local bound_parent
+  bound_parent="$(dirname -- "$BOUND_ARCHIVE")"
+  if [[ "$(id -u)" == "0" ]]; then
+    ordinary_trusted_path "$bound_parent" \
+      || die "[!] Bound archive parent is not root-controlled: $bound_parent"
+  fi
+
+  if ! (set -o noclobber; : > "$BOUND_ARCHIVE"); then
+    die "[!] Could not reserve protected archive snapshot."
+  fi
+  BOUND_ARCHIVE_CREATED=1
+  if ! chmod 0600 "$BOUND_ARCHIVE"; then
+    cleanup_bound_archive
+    die "[!] Could not protect archive snapshot."
+  fi
+  if ! cat -- "$ARCHIVE" > "$BOUND_ARCHIVE"; then
+    cleanup_bound_archive
+    die "[!] Could not create protected archive snapshot."
+  fi
+
+  local actual_sha256
+  if ! actual_sha256="$(sha256sum -- "$BOUND_ARCHIVE" | awk '{print $1}')"; then
+    cleanup_bound_archive
+    die "[!] Could not hash archive snapshot."
+  fi
+  if [[ "$actual_sha256" != "$ARCHIVE_SHA256" ]]; then
+    cleanup_bound_archive
+    die "[!] Archive SHA-256 does not match the independently pinned digest."
+  fi
 }
 
 detect_php_fpm_reload_service() {
@@ -2616,6 +2676,7 @@ while [[ $# -gt 0 ]]; do
     --rel) REL="$2"; shift 2;;
     --app) APP="$2"; shift 2;;
     --src) SRC="$2"; shift 2;;
+    --archive-sha256) ARCHIVE_SHA256="$2"; shift 2;;
     --user) WEBUSER="$2"; shift 2;;
     --reload) RELOAD_SERVICES="$2"; RELOAD_SERVICES_EXPLICIT=1; shift 2;;
     --result-file) DEPLOY_RESULT_RECEIPT_PATH="$2"; shift 2;;
@@ -2645,6 +2706,10 @@ if [[ -n "$DEPLOY_RESULT_RECEIPT_PATH" && "$DRYRUN" -eq 1 ]]; then
   die "[!] --result-file cannot be used with --dry-run."
 fi
 [[ -n "$REL" ]] || die "[!] --rel is required."
+if [[ "$DRYRUN" -eq 0 ]]; then
+  [[ "$ARCHIVE_SHA256" =~ ^[a-f0-9]{64}$ ]] \
+    || die "[!] --archive-sha256 is required for non-dry deployments and must be a lowercase 64-character SHA-256 digest."
+fi
 [[ "$REQUIRE_ZERO_SURPRISE" == "0" || "$REQUIRE_ZERO_SURPRISE" == "1" ]] \
   || die "[!] --require-zero-surprise must be 0 or 1."
 [[ "$ZERO_SURPRISE_CANARY_ENABLED" == "0" || "$ZERO_SURPRISE_CANARY_ENABLED" == "1" ]] \
@@ -2718,6 +2783,7 @@ fi
 
 ARCHIVE="${SRC}/${REL}.tar.gz"
 STAGE="${APP}_${REL}_stage"
+BOUND_ARCHIVE="${STAGE}.archive-bound.tar.gz"
 PREV="${APP}_prev_${REL}"
 LOG="/var/log/deploy_ea_${REL}.log"
 
@@ -2770,6 +2836,7 @@ require_command curl
 require_command php
 require_command runuser
 require_command rsync
+require_command sha256sum
 if [[ "$REQUIRE_ZERO_SURPRISE" -eq 1 ]]; then
   require_command docker
   require_docker_compose
@@ -2779,7 +2846,9 @@ if [[ -e "$STAGE" ]]; then
   run_shell "rm -rf '$STAGE'"
 fi
 run_shell "mkdir -p '$STAGE'"
-run_shell "tar -xzf '$ARCHIVE' -C '$STAGE'"
+bind_archive_snapshot
+run_shell "tar -xzf '$BOUND_ARCHIVE' -C '$STAGE'"
+cleanup_bound_archive
 
 if [[ "$DRYRUN" -eq 0 ]]; then
   CAND="$(find "$STAGE" -type f -path '*/application/config/config.php' | head -n 1 || true)"

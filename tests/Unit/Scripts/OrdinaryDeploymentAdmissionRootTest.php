@@ -115,6 +115,8 @@ final class OrdinaryDeploymentAdmissionRootTest extends TestCase
         chmod($script, 0700);
         $archiveRoot = $this->fixture . '/src';
         mkdir($archiveRoot, 0700);
+        $archive = $archiveRoot . '/ea_deploy_fixture.tar.gz';
+        file_put_contents($archive, "synthetic archive\n");
         $app = $this->fixture . '/live';
         mkdir($app, 0700);
         return $this->runCommand([
@@ -124,6 +126,8 @@ final class OrdinaryDeploymentAdmissionRootTest extends TestCase
             'ea_deploy_fixture',
             '--src',
             $archiveRoot,
+            '--archive-sha256',
+            hash_file('sha256', $archive),
             '--app',
             $app,
             '--result-file',

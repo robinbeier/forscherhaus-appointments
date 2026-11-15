@@ -39,10 +39,10 @@ FOREIGN_MARKERS = (
     Path('/var/lib/fh-defense-ordinary/sessions.json'),
     Path('/var/lib/fh-defense-ordinary/sessions.json.tmp'),
 )
-OLD_SHA256 = '788d3bfa57e75022e2597a2244a767cce8c119ea459400cdb3ee6f18f138c9c5'
-OLD_SIZE = 99968
-NEW_SHA256 = 'ab9bbc124579fa465c25cdbda5e47f5ab60a450530616e527e41232611a40b28'
-NEW_SIZE = 100492
+OLD_SHA256 = 'eb73e226c6c09f4f22945b463073e8cc56b3d1e0e15239825933abb7f9264c65'
+OLD_SIZE = 102483
+NEW_SHA256 = 'f1fe428f50a7b2a94eff4ef82243e8e6f58904eaeca8749826d91e1a9fa83aa8'
+NEW_SIZE = 104901
 
 class SyncError(RuntimeError): pass
 
