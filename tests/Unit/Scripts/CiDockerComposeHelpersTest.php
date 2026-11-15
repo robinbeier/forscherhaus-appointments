@@ -359,18 +359,25 @@ class CiDockerComposeHelpersTest extends TestCase
             sleep() { :; }
             ci_docker_compose() {
               attempt_file="${TMPDIR:-/tmp}/ci-docker-seed-attempts-default"
+              args_file="${TMPDIR:-/tmp}/ci-docker-seed-args-default"
               attempts=0
               if [[ -f "$attempt_file" ]]; then
                 attempts="$(cat "$attempt_file")"
               fi
               attempts=$((attempts + 1))
               printf '%s' "$attempts" > "$attempt_file"
+              printf '%s' "$*" > "$args_file"
               return 1
             }
 
             attempt_file="${TMPDIR:-/tmp}/ci-docker-seed-attempts-default"
+            args_file="${TMPDIR:-/tmp}/ci-docker-seed-args-default"
             rm -f "$attempt_file"
-            ci_docker_install_seed_instance test exec -T php-fpm php index.php console install
+            if ci_docker_install_seed_instance test exec -T php-fpm php index.php console install; then
+              exit 1
+            fi
+            grep -Fqx 'test exec -T php-fpm env APP_ENV=testing php index.php console install fixture' "$args_file"
+            test "$(cat "$attempt_file")" = '3'
             BASH
             ,
             '',

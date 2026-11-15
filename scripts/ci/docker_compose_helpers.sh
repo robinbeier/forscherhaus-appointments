@@ -333,9 +333,24 @@ ci_docker_install_seed_instance() {
     local max_attempts="${CI_DOCKER_INSTALL_SEED_MAX_ATTEMPTS:-3}"
     shift
 
+    local -a command=("$@")
+    local index
+    local found_php=0
+    for ((index = 0; index < ${#command[@]}; index++)); do
+        if [[ "${command[index]}" == "php" ]]; then
+            command=("${command[@]:0:index}" env APP_ENV=testing "${command[@]:index}")
+            found_php=1
+            break
+        fi
+    done
+    if [[ "$found_php" != "1" ]]; then
+        echo "[$log_prefix] console install command must include php." >&2
+        return 1
+    fi
+
     local attempt
     for ((attempt = 1; attempt <= max_attempts; attempt++)); do
-        if ci_docker_compose "$@"; then
+        if ci_docker_compose "${command[@]}" fixture; then
             return 0
         fi
         echo "[$log_prefix] console install failed on attempt ${attempt}; retrying in 3s." >&2

@@ -84,7 +84,7 @@ class Instance
      *
      * @throws Exception
      */
-    public function seed(): string
+    public function seed(?string $administratorPassword = null): string
     {
         // Settings
 
@@ -96,7 +96,7 @@ class Instance
 
         // Admin
 
-        $password = 'administrator';
+        $password = $administratorPassword ?? $this->generateAdministratorPassword();
 
         $this->CI->admins_model->save([
             'first_name' => 'John',
@@ -153,6 +153,17 @@ class Instance
         ]);
 
         return $password;
+    }
+
+    /**
+     * Generate a per-install administrator password.
+     *
+     * The deterministic fixture password is supplied explicitly by the
+     * console test path; normal installations never use a source-known value.
+     */
+    protected function generateAdministratorPassword(): string
+    {
+        return bin2hex(random_bytes(24));
     }
 
     /**
