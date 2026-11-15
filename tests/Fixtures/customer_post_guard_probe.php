@@ -26,7 +26,11 @@ function session(string $key): mixed
 {
     global $scenario, $events;
     $events[] = 'session:' . $key;
-    return $key === 'user_id' ? 17 : (str_starts_with($scenario, 'nonadmin-') ? 'secretary' : DB_SLUG_ADMIN);
+    return $key === 'user_id'
+        ? 17
+        : (str_starts_with($scenario, 'nonadmin-') || $scenario === 'visibility-revoked-late'
+            ? 'secretary'
+            : DB_SLUG_ADMIN);
 }
 function setting(string $key): mixed
 {
@@ -121,10 +125,18 @@ class ProbeDb
                         : PRIV_VIEW | PRIV_ADD | PRIV_EDIT | PRIV_DELETE);
             return new ProbeDbResult([
                 [
-                    'slug' => str_starts_with($GLOBALS['scenario'], 'nonadmin-') ? 'secretary' : DB_SLUG_ADMIN,
+                    'slug' =>
+                        str_starts_with($GLOBALS['scenario'], 'nonadmin-') ||
+                        $GLOBALS['scenario'] === 'visibility-revoked-late'
+                            ? 'secretary'
+                            : DB_SLUG_ADMIN,
                     'customers' => $mask,
                 ],
             ]);
+        }
+        if (str_contains($sql, '`value`') && str_contains($sql, '`settings`')) {
+            $GLOBALS['events'][] = 'lock_settings:limit_customer_visibility';
+            return new ProbeDbResult([['value' => $GLOBALS['scenario'] === 'visibility-revoked-late' ? '1' : '0']]);
         }
         if (str_contains($sql, '`users`')) {
             $GLOBALS['events'][] = 'lock_users:' . implode(',', $params);
@@ -176,7 +188,9 @@ class ProbeRolesModel
     public function value(int $id, string $field): string
     {
         $GLOBALS['events'][] = "roles:value:$id:$field";
-        return str_starts_with($GLOBALS['scenario'], 'nonadmin-') ? 'secretary' : DB_SLUG_ADMIN;
+        return str_starts_with($GLOBALS['scenario'], 'nonadmin-') || $GLOBALS['scenario'] === 'visibility-revoked-late'
+            ? 'secretary'
+            : DB_SLUG_ADMIN;
     }
 }
 class Backoffice_request_dto_factory

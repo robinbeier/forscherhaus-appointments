@@ -381,7 +381,7 @@ class Customers extends EA_Controller
                 throw new RuntimeException('Could not lock customer visibility setting.');
             }
             $limit_customer_visibility = (string) ($visibility_setting->row_array()['value'] ?? '');
-            if ($role_slug !== DB_SLUG_ADMIN && filter_var($limit_customer_visibility, FILTER_VALIDATE_BOOLEAN)) {
+            if ($role_slug !== DB_SLUG_ADMIN && (bool) $limit_customer_visibility) {
                 if ($owns_transaction) {
                     $this->db->trans_rollback();
                     $owns_transaction = false;

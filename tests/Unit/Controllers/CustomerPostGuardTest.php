@@ -64,6 +64,7 @@ final class CustomerPostGuardTest extends TestCase
                     'trans_begin',
                     'lock_users:17',
                     'lock_roles:3',
+                    'lock_settings:limit_customer_visibility',
                     'insert_new:' . json_encode($this->payload($action), JSON_THROW_ON_ERROR),
                     'find:42',
                     'trans_status',
@@ -134,7 +135,7 @@ final class CustomerPostGuardTest extends TestCase
                 'trans_begin',
                 'lock_users:17',
                 'lock_roles:3',
-                'setting:limit_customer_visibility',
+                'lock_settings:limit_customer_visibility',
                 'insert_new:' . json_encode($this->payload('store'), JSON_THROW_ON_ERROR),
                 'find:42',
                 'trans_status',
@@ -186,6 +187,33 @@ final class CustomerPostGuardTest extends TestCase
                 'trans_begin',
                 'lock_users:17',
                 'lock_roles:3',
+                'trans_rollback',
+                'abort:403',
+            ],
+            $result['events'],
+        );
+        self::assertSame(403, $result['status']);
+        self::assertSame([], $result['saved']);
+    }
+
+    public function testStoreRejectsLateVisibilityRestrictionBeforeInsert(): void
+    {
+        $result = $this->probe('store', 'visibility-revoked-late', 'POST');
+        self::assertSame(
+            [
+                'session:user_id',
+                'auth:add:customers:17',
+                'users:value:17:id_roles',
+                'roles:value:3:slug',
+                'setting:limit_customer_visibility',
+                'dto:customer',
+                'only:' . json_encode(self::FIELDS, JSON_THROW_ON_ERROR),
+                'optional:[]',
+                'trans_active',
+                'trans_begin',
+                'lock_users:17',
+                'lock_roles:3',
+                'lock_settings:limit_customer_visibility',
                 'trans_rollback',
                 'abort:403',
             ],
