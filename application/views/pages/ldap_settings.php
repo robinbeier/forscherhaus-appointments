@@ -53,7 +53,7 @@
                                     <?= lang('host') ?>
                                 </label>
                                 <input id="ldap-host" class="form-control" value="<?= html_escape(
-                                    (string) ($ldap_operator_host ?? ''),
+                                    (string) vars('ldap_operator_host', ''),
                                 ) ?>" readonly>
                             </div>
 
@@ -62,7 +62,7 @@
                                     <?= lang('port') ?>
                                 </label>
                                 <input id="ldap-port" class="form-control" value="<?= html_escape(
-                                    (string) ($ldap_operator_port ?? ''),
+                                    (string) vars('ldap_operator_port', 0),
                                 ) ?>" readonly>
                             </div>
                         </div>
