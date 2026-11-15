@@ -1,5 +1,25 @@
 # Daybreak follow-up: API authority, scheduling, LDAP, and session language
 
+## Follow-up scan of the merged source
+
+The repository scan of application commit `a75378859c456f8380ffb3eae573b69e0760402e`
+(run `wfr_b5e58cd49de44a5dd427f8bd8becb916ce1f1937be3c0a79a90c99b968541f7b`)
+completed with `output_validation_warning`. Its canonical finding list was
+empty, while the report artifacts contained two provisional Medium observations:
+an existing staff account's username could be assigned to another account, and
+an untrusted theme value could reach the stylesheet link on rendered pages.
+Both behaviors were reproduced against the source and are addressed in this
+follow-up: shared account writes reject duplicate usernames, the database
+enforces uniqueness for nonempty usernames, ambiguous login lookups fail closed,
+and theme values are restricted to installed stylesheets and escaped in output.
+The migration must pass a duplicate-data precheck on the target database.
+
+Local tests and review are evidence for this branch only. A new Daybreak scan
+must target its exact merged commit. The production application remains on its
+older release until the separate backup, deployment, and post-release checks
+complete. The two report observations are provisional because the scan's output
+validation warned; an empty canonical list does not establish a clean result.
+
 The repository scan of application commit `9d12919d` (run
 `wfr_966439937abb8d23452c8d4b4f7b9cf0492374b80f9da1f9d947cc4b7d8ecf4c`)
 completed with `output_validation_warning` and no validated canonical findings.

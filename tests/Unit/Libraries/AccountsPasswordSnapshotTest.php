@@ -32,10 +32,25 @@ final class AccountsPasswordSnapshotTest extends TestCase
         }
     }
 
-    private function probe(string $format, string $phase, string $change): array
+    public function testAmbiguousDuplicateUsernameFails_closed_before_password_verification(): void
+    {
+        $result = $this->probe('legacy', 'reader', 'stable', 'duplicate');
+
+        self::assertFalse($result['authenticated']);
+        self::assertSame(1, $result['reads']);
+    }
+
+    private function probe(string $format, string $phase, string $change, string $mode = ''): array
     {
         $process = proc_open(
-            [PHP_BINARY, dirname(__DIR__, 2) . '/Fixtures/accounts_password_race_probe.php', $format, $phase, $change],
+            [
+                PHP_BINARY,
+                dirname(__DIR__, 2) . '/Fixtures/accounts_password_race_probe.php',
+                $format,
+                $phase,
+                $change,
+                $mode,
+            ],
             [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
         );

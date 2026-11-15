@@ -15,7 +15,7 @@
     <link rel="icon" sizes="192x192" href="<?= asset_url('assets/img/logo.png') ?>">
 
     <link rel="stylesheet" type="text/css"
-          href="<?= asset_url('assets/css/themes/' . setting('theme', 'default') . '.css') ?>">
+          href="<?= html_escape(theme_asset_url(setting('theme', 'default'))) ?>">
     <link rel="stylesheet" type="text/css" href="<?= asset_url('assets/css/general.css') ?>">
     <link rel="stylesheet" type="text/css" href="<?= asset_url('assets/css/layouts/account_layout.css') ?>">
 

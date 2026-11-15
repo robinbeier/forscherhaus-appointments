@@ -156,6 +156,10 @@ class Settings_model extends EA_Model
         if ($setting['name'] === 'company_color' && !validate_hex_color($setting['value'] ?? null)) {
             throw new InvalidArgumentException('The company color must be a valid hexadecimal color.');
         }
+
+        if ($setting['name'] === 'theme' && !is_valid_theme_slug($setting['value'] ?? null)) {
+            throw new InvalidArgumentException('The selected theme is not available.');
+        }
     }
 
     /**

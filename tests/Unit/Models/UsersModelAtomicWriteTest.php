@@ -152,6 +152,32 @@ final class UsersModelAtomicWriteTest extends TestCase
         $this->assertSame($before['password'], $afterMissing['password']);
     }
 
+    public function test_update_rejects_a_username_owned_by_another_user_before_mutation(): void
+    {
+        $firstId = $this->usersModel->save($this->userData());
+        $this->createdUserIds[] = $firstId;
+        $second = $this->userData();
+        $second['settings']['username'] = 'users-duplicate-' . bin2hex(random_bytes(4));
+        $secondId = $this->usersModel->save($second);
+        $this->createdUserIds[] = $secondId;
+
+        $before = $this->usersModel->find($secondId);
+        $before['settings'] = ['username' => (string) $before['settings']['username']];
+        $before['settings']['username'] = (string) $this->usersModel->find($firstId)['settings']['username'];
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('username is already used');
+        try {
+            $this->usersModel->save($before);
+        } finally {
+            $stored = $this->usersModel->find($secondId);
+            $this->assertNotSame(
+                $stored['settings']['username'],
+                $this->usersModel->find($firstId)['settings']['username'],
+            );
+        }
+    }
+
     public function test_ldap_identity_change_bumps_credential_version(): void
     {
         $user = $this->userData();

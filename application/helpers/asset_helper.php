@@ -38,3 +38,44 @@ function asset_url(string $uri = '', ?string $protocol = null): string
 
     return base_url($uri . $cache_busting_token, $protocol);
 }
+
+/**
+ * Check whether a theme value names a stylesheet shipped by this install.
+ */
+function is_valid_theme_slug(mixed $theme): bool
+{
+    if (!is_string($theme) || !preg_match('/\A[a-z0-9][a-z0-9_-]{0,63}\z/', $theme)) {
+        return false;
+    }
+
+    $theme_directory = defined('FCPATH') ? FCPATH . 'assets/css/themes' : dirname(__DIR__, 2) . '/assets/css/themes';
+
+    $compiled_files = array_merge(glob($theme_directory . '/*.css') ?: [], glob($theme_directory . '/*.min.css') ?: []);
+
+    foreach ($compiled_files as $file) {
+        $name = basename($file);
+        $name = preg_replace('/\.min\.css$/', '', $name);
+        $name = preg_replace('/\.(?:css|scss)$/', '', (string) $name);
+        if ($name === $theme) {
+            return true;
+        }
+    }
+
+    // Source-only checkouts do not contain generated CSS; keep the built-in
+    // default safe and deterministic until the frontend build runs.
+    if ($theme === 'default' && $compiled_files === []) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * Return a safe stylesheet URL for the configured application theme.
+ */
+function theme_asset_url(mixed $theme, ?string $protocol = null): string
+{
+    $theme = is_valid_theme_slug($theme) ? $theme : 'default';
+
+    return asset_url('assets/css/themes/' . $theme . '.css', $protocol);
+}

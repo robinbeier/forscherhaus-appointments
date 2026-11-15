@@ -446,6 +446,7 @@ class CalendarEventPermissionsTest extends TestCase
             ->row_array();
         unset($settings['id']);
         $settings['id_users'] = $id;
+        $settings['username'] = 'calendar-provider-' . bin2hex(random_bytes(8));
         get_instance()->db->insert('user_settings', $settings);
         get_instance()->db->insert('services_providers', ['id_users' => $id, 'id_services' => $serviceId]);
         return $id;
@@ -473,6 +474,7 @@ class CalendarEventPermissionsTest extends TestCase
             ->row_array();
         unset($settings['id']);
         $settings['id_users'] = $id;
+        $settings['username'] = 'calendar-secretary-' . bin2hex(random_bytes(8));
         get_instance()->db->insert('user_settings', $settings);
         foreach ($providerIds as $providerId) {
             get_instance()->db->insert('secretaries_providers', [

@@ -49,7 +49,7 @@ class Accounts
      */
     public function check_login(string $username, string $password): ?array
     {
-        $user_settings = $this->CI->db
+        $matches = $this->CI->db
             ->select(
                 'user_settings.id_users, user_settings.username, user_settings.password, user_settings.salt, ' .
                     'users.id AS user_id, users.email AS user_email, users.timezone AS user_timezone, ' .
@@ -59,8 +59,17 @@ class Accounts
             ->join('users', 'users.id = user_settings.id_users', 'inner')
             ->join('roles', 'roles.id = users.id_roles', 'inner')
             ->where('user_settings.username', $username)
+            ->limit(2)
             ->get()
-            ->row_array();
+            ->result_array();
+
+        // Authentication must never choose an arbitrary row when the
+        // username invariant is absent or being repaired.
+        if (count($matches) !== 1) {
+            return null;
+        }
+
+        $user_settings = $matches[0];
 
         $stored_password = (string) ($user_settings['password'] ?? '');
         $salt = (string) ($user_settings['salt'] ?? '');
