@@ -331,7 +331,10 @@ class CiWorkflowContractTest extends TestCase
 
         $installDatabase = $this->stepRun($steps, 'Install deterministic build-test instance');
         self::assertStringContainsString('for attempt in 1 2 3; do', $installDatabase);
-        self::assertStringContainsString('if php index.php console install fixture; then', $installDatabase);
+        self::assertStringContainsString(
+            'if APP_ENV=testing php index.php console install fixture; then',
+            $installDatabase,
+        );
         self::assertStringContainsString('console install failed after 3 attempts.', $installDatabase);
         self::assertStringContainsString('exit 1', $installDatabase);
 
@@ -773,7 +776,7 @@ class CiWorkflowContractTest extends TestCase
 
         $install = $this->stepRun($steps, 'Install deterministic seed instance');
         self::assertStringContainsString('for attempt in 1 2 3; do', $install);
-        self::assertStringContainsString('if php index.php console install fixture; then', $install);
+        self::assertStringContainsString('if APP_ENV=testing php index.php console install fixture; then', $install);
         self::assertStringContainsString('console install failed after 3 attempts.', $install);
         self::assertStringContainsString('exit 1', $install);
 
