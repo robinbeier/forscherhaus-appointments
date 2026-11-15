@@ -78,6 +78,13 @@ global budgets. This is an accepted exception for the current sprint because a
 stronger identity requirement would change the family booking flow. No claim
 of capacity fairness or complete abuse prevention follows from this decision.
 
+The repository now bounds a public unavailable-dates request to 512
+provider-day availability checks and applies a separate limit of 20 such
+requests per 120 seconds and IP. These source-level controls address the
+monthly calculation amplification, but the current production release does
+not yet contain them. They do not remove the accepted distributed-booking
+capacity risk.
+
 The latest Daybreak review also reported a Low-risk, source-level conditional
 email-membership risk. In current production, `display_email=0` rejects a
 non-empty email before any membership lookup, so the risk is inactive there;

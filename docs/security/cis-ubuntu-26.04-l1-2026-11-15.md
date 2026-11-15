@@ -23,6 +23,7 @@ The observations are point-in-time. They do not prove reboot persistence, future
 - The host reports Ubuntu 26.04.1 with kernel `7.0.0-43`.
 - The application health endpoints, PDF renderer, core services, containers, and monitored checks were healthy during the read-only check.
 - The active application release is the older `ea_20261102_dashboard_46869837`; the database is at migration version 70. Newer repository migrations have not been treated as deployed.
+- The reviewed repository fixes through `9d12919d23a062446a78ff6fa886d5ae1326566f` are merged but are not evidence of production deployment. The current source now bounds public monthly availability work; the older active release does not yet have that fix.
 - Public exposure was limited to the expected HTTP(S) and SSH listeners; internal service listeners remained non-public during the observation.
 - SSH effective settings, time synchronisation, logging/rotation, package provenance for privileged files, and the applicable filesystem ownership checks were observed, with the confidence recorded in the ledger.
 - No reboot persistence proof is available. A live value or a successful pre-change check is not evidence that the value survives reboot.
