@@ -373,7 +373,15 @@ class Customers extends EA_Controller
             }
 
             $role_slug = (string) $role_row['slug'];
-            if ($role_slug !== DB_SLUG_ADMIN && setting('limit_customer_visibility')) {
+            $visibility_setting = $this->db->query(
+                'SELECT `value` FROM `' . $this->db->dbprefix('settings') . '` WHERE `name` = ? FOR UPDATE',
+                ['limit_customer_visibility'],
+            );
+            if ($visibility_setting === false) {
+                throw new RuntimeException('Could not lock customer visibility setting.');
+            }
+            $limit_customer_visibility = (string) ($visibility_setting->row_array()['value'] ?? '');
+            if ($role_slug !== DB_SLUG_ADMIN && filter_var($limit_customer_visibility, FILTER_VALIDATE_BOOLEAN)) {
                 if ($owns_transaction) {
                     $this->db->trans_rollback();
                     $owns_transaction = false;

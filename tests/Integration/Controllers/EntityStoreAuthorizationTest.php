@@ -244,6 +244,18 @@ final class EntityStoreAuthorizationTest extends TestCase
         self::assertSame(0, (int) get_instance()->db->where('email', $email)->count_all_results('users'));
     }
 
+    public function testCustomerCreateSerializesVisibilitySettingWithInsert(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 3) . '/application/controllers/Customers.php');
+        $setting_lock = strpos($source, 'WHERE `name` = ? FOR UPDATE');
+        $insert = strpos($source, '$customer_id = $this->customers_model->insert_new($customer);');
+
+        self::assertNotFalse($setting_lock);
+        self::assertNotFalse($insert);
+        self::assertLessThan($insert, $setting_lock);
+        self::assertStringContainsString('limit_customer_visibility', substr($source, $setting_lock - 220, 320));
+    }
+
     public function testExistingCustomerEmailWithoutIdCannotChangeExistingRecord(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
