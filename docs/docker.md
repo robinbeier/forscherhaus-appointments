@@ -390,7 +390,14 @@ process, all Linux capabilities dropped, `no-new-privileges`, a read-only root
 filesystem, writable `/tmp` tmpfs for Chromium runtime state, 1 GiB memory and
 1.5 GiB memory-plus-swap limits, 512 PIDs, and 10 MiB/3-file JSON logs. Cold
 browser startup is single-flight, so concurrent requests share one Chromium
-launch. In the isolated 60-page plus four-request regression, the cgroup memory
+launch. The renderer admits at most four PDF renders at once; excess requests
+fail immediately with HTTP 503 and `Retry-After: 1` instead of forming an
+unbounded queue. Operators may set `PDF_MAX_CONCURRENT_RENDERS` to an integer
+from 1 through 16 when the renderer is started; invalid or absent values use
+the safe default of four. Each admitted request has a 30-second total body
+ingress deadline; a slow or abandoned client is closed and its slot released.
+`PDF_BODY_INGRESS_TIMEOUT_MS` may override this with 100–120000 milliseconds.
+In the isolated 60-page plus four-request regression, the cgroup memory
 peak was about 946 MiB (the sampled Docker display peaked at 864 MiB), with
 zero cgroup OOM events. This is a bounded local workload, not a host-wide
 capacity guarantee; use the cgroup peak when assessing the 1 GiB limit. The

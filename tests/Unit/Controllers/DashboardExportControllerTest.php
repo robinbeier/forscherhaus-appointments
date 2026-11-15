@@ -2,18 +2,23 @@
 
 namespace Tests\Unit\Controllers;
 
+use CI_Zip;
 use Dashboard_metrics;
 use Dashboard_export;
 use DateTimeImmutable;
 use DateTimeZone;
 use IntlDateFormatter;
 use InvalidArgumentException;
+use Pdf_renderer;
+use ReflectionProperty;
 use RuntimeException;
 use Throwable;
 use Tests\TestCase;
 
 require_once APPPATH . 'controllers/Dashboard_export.php';
 require_once APPPATH . 'libraries/Dashboard_metrics.php';
+require_once APPPATH . 'libraries/Pdf_renderer.php';
+require_once dirname(__DIR__, 3) . '/system/libraries/Zip.php';
 
 class DashboardExportControllerTest extends TestCase
 {
@@ -630,6 +635,70 @@ class DashboardExportControllerTest extends TestCase
         $this->assertSame(['attachment' => true], $options);
     }
 
+    public function testTeacherZipBudgetRejectsTooManyReportsOrPdfBytes(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $controller->callAssertTeacherZipBudget(200, 67108864);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('maximum of 200 reports');
+        $controller->callAssertTeacherZipBudget(201, 0);
+    }
+
+    public function testTeacherZipBudgetRejectsPdfMemoryGrowth(): void
+    {
+        $controller = $this->createControllerWithThreshold(0.9);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('maximum PDF memory budget');
+        $controller->callAssertTeacherZipBudget(0, 67108865);
+    }
+
+    public function testTeacherZipRejectsExcessMembersBeforeRenderingOrSendingPartialOutput(): void
+    {
+        $pdfRenderer = $this->createMock(Pdf_renderer::class);
+        $pdfRenderer->expects($this->never())->method('render_view');
+
+        $zip = $this->createMock(CI_Zip::class);
+        $zip->expects($this->once())->method('clear_data');
+        $zip->expects($this->never())->method('add_data');
+
+        $controller = new class extends Dashboard_export {
+            public bool $sent = false;
+
+            public function __construct() {}
+
+            public function callStreamTeacherZipDownload(array $teacherReports): void
+            {
+                $this->streamTeacherZipDownload(
+                    $teacherReports,
+                    [],
+                    new DateTimeImmutable('2026-11-15'),
+                    new DateTimeImmutable('2026-11-16'),
+                );
+            }
+
+            protected function streamZipDownload(string $filename): void
+            {
+                $this->sent = true;
+            }
+        };
+
+        $pdfProperty = new ReflectionProperty(Dashboard_export::class, 'pdfRenderer');
+        $pdfProperty->setValue($controller, $pdfRenderer);
+        $zipProperty = new ReflectionProperty(Dashboard_export::class, 'zipLibrary');
+        $zipProperty->setValue($controller, $zip);
+
+        try {
+            $controller->callStreamTeacherZipDownload(array_fill(0, 201, []));
+            self::fail('Expected an oversized teacher ZIP request to be rejected.');
+        } catch (RuntimeException $exception) {
+            self::assertStringContainsString('maximum of 200 reports', $exception->getMessage());
+        }
+        self::assertFalse($controller->sent);
+    }
+
     public function testBuildProviderPreparationPdfStreamOptionsUsesA4Landscape(): void
     {
         $controller = $this->createControllerWithThreshold(0.9);
@@ -971,6 +1040,11 @@ class DashboardExportControllerTest extends TestCase
             public function callBuildProviderPreparationPdfStreamOptions(): array
             {
                 return $this->buildProviderPreparationPdfStreamOptions();
+            }
+
+            public function callAssertTeacherZipBudget(int $memberCount, int $pdfBytes): void
+            {
+                $this->assertTeacherZipBudget($memberCount, $pdfBytes);
             }
 
             public function callBuildSummary(array $metrics, float $threshold): array
