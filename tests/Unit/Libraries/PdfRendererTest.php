@@ -31,7 +31,7 @@ class PdfRendererTest extends TestCase
         $this->assertSame(['http://pdf-renderer:3000'], $endpoints);
     }
 
-    public function testResolveEndpointsKeepConfiguredEndpointFirstAndRuntimeAwareFallbacksAfterwards(): void
+    public function testResolveEndpointsTreatExplicitEndpointAsSoleImplicitTrustBoundary(): void
     {
         $renderer = $this->createRenderer(false, false);
         $endpoints = $renderer->callResolveEndpoints([
@@ -39,7 +39,18 @@ class PdfRendererTest extends TestCase
             'fallback_urls' => [],
         ]);
 
-        $this->assertSame(['http://example.com:3000', 'http://127.0.0.1:3003', 'http://localhost:3003'], $endpoints);
+        $this->assertSame(['http://example.com:3000'], $endpoints);
+    }
+
+    public function testResolveEndpointsKeepExplicitFallbacksWithConfiguredEndpoint(): void
+    {
+        $renderer = $this->createRenderer(false, false);
+        $endpoints = $renderer->callResolveEndpoints([
+            'base_url' => 'http://example.com:3000/',
+            'fallback_urls' => ['http://trusted.example:3001/'],
+        ]);
+
+        $this->assertSame(['http://example.com:3000', 'http://trusted.example:3001'], $endpoints);
     }
 
     public function testResolveEndpointsUseApacheServerVariableWhenPhpEnvironmentMapIsEmpty(): void
@@ -60,7 +71,7 @@ class PdfRendererTest extends TestCase
                 'fallback_urls' => [],
             ]);
 
-            $this->assertSame(['http://localhost:3003', 'http://127.0.0.1:3003'], $endpoints);
+            $this->assertSame(['http://localhost:3003'], $endpoints);
         } finally {
             if ($hadEnv) {
                 $_ENV['PDF_RENDERER_URL'] = $envValue;
@@ -185,6 +196,27 @@ class PdfRendererTest extends TestCase
         }
     }
 
+    public function testRenderHtmlWithExplicitEndpointDoesNotRetryImplicitRuntimeEndpoint(): void
+    {
+        $renderer = $this->createFlowRenderer([
+            'http://primary.example:3000' => new RuntimeException('primary unavailable'),
+            'http://127.0.0.1:3003' => '%PDF-implicit-leak',
+            'http://localhost:3003' => '%PDF-implicit-leak',
+        ]);
+        $renderer->configureResolvedEndpoints([
+            'base_url' => 'http://primary.example:3000',
+            'fallback_urls' => [],
+        ]);
+
+        try {
+            $renderer->render_html('<html><body>private</body></html>');
+            $this->fail('Expected renderer failure.');
+        } catch (RuntimeException $exception) {
+            $this->assertSame('PDF rendering failed for all configured endpoints.', $exception->getMessage());
+            $this->assertSame(['http://primary.example:3000'], $renderer->attemptedEndpoints);
+        }
+    }
+
     private function createRenderer(bool $isLocalEnvironment, bool $isContainerRuntime): object
     {
         return new class ($isLocalEnvironment, $isContainerRuntime) extends Pdf_renderer {
@@ -243,6 +275,16 @@ class PdfRendererTest extends TestCase
                 $this->defaultOrientation = 'portrait';
                 $this->defaultMargin = [];
                 $this->defaultWaitFor = null;
+            }
+
+            public function configureResolvedEndpoints(array $config): void
+            {
+                $this->endpoints = $this->resolveEndpoints($config);
+            }
+
+            protected function isContainerRuntime(): bool
+            {
+                return false;
             }
 
             protected function callRenderer(string $endpoint, array $payload, bool $isPrimary = false): string
