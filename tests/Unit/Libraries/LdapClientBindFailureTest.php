@@ -47,6 +47,12 @@ class LdapClientBindFailureTest extends TestCase
                 return true;
             }
 
+            protected function configureTimeouts(mixed $connection): bool
+            {
+                $this->calls[] = 'timeouts';
+                return true;
+            }
+
             protected function startTls(mixed $connection): bool
             {
                 $this->calls[] = 'start-tls';
@@ -93,7 +99,7 @@ class LdapClientBindFailureTest extends TestCase
 
         self::assertIsObject($client->assertSecureConnection('ldap.example.invalid', 389));
         self::assertSame(
-            ['certificate-verification', ['connect', 'ldap.example.invalid', 389], 'protocol', 'start-tls'],
+            ['certificate-verification', ['connect', 'ldap.example.invalid', 389], 'timeouts', 'protocol', 'start-tls'],
             $client->calls,
         );
     }
@@ -126,6 +132,12 @@ class LdapClientBindFailureTest extends TestCase
                 return true;
             }
 
+            protected function configureTimeouts(mixed $connection): bool
+            {
+                $this->calls[] = 'timeouts';
+                return true;
+            }
+
             protected function startTls(mixed $connection): bool
             {
                 $this->calls[] = 'start-tls';
@@ -141,7 +153,58 @@ class LdapClientBindFailureTest extends TestCase
         try {
             $client->assertSecureConnection('ldap.example.invalid', 389);
         } finally {
-            self::assertSame(['certificate-verification', 'connect', 'protocol', 'start-tls'], $client->calls);
+            self::assertSame(
+                ['certificate-verification', 'connect', 'timeouts', 'protocol', 'start-tls'],
+                $client->calls,
+            );
+        }
+    }
+
+    public function testTimeoutSetupFailureIsOperationalFailureBeforeProtocolOrTls(): void
+    {
+        $client = new class extends Ldap_client {
+            public array $calls = [];
+
+            public function assertSecureConnection(string $host, int $port): mixed
+            {
+                return $this->establishSecureConnection($host, $port);
+            }
+
+            protected function setTlsCertificateVerification(): bool
+            {
+                $this->calls[] = 'certificate-verification';
+                return true;
+            }
+            protected function connectToServer(string $host, int $port): mixed
+            {
+                $this->calls[] = 'connect';
+                return new \stdClass();
+            }
+            protected function configureTimeouts(mixed $connection): bool
+            {
+                $this->calls[] = 'timeouts';
+                return false;
+            }
+            protected function configureProtocol(mixed $connection): bool
+            {
+                $this->calls[] = 'protocol';
+                return true;
+            }
+            protected function startTls(mixed $connection): bool
+            {
+                $this->calls[] = 'start-tls';
+                return true;
+            }
+            public function __construct() {}
+        };
+
+        $this->expectException(\LdapOperationalException::class);
+        $this->expectExceptionMessage('Unable to configure the LDAP connection.');
+
+        try {
+            $client->assertSecureConnection('ldap.example.invalid', 389);
+        } finally {
+            self::assertSame(['certificate-verification', 'connect', 'timeouts'], $client->calls);
         }
     }
 }

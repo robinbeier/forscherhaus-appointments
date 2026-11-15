@@ -23,6 +23,11 @@ final class LdapOperationalException extends RuntimeException {}
  */
 class Ldap_client
 {
+    /** Bound connection and synchronous LDAP operation waits in seconds. */
+    private const NETWORK_TIMEOUT_SECONDS = 10;
+
+    private const OPERATION_TIMEOUT_SECONDS = 10;
+
     /**
      * @var EA_Controller|CI_Controller
      */
@@ -161,7 +166,8 @@ class Ldap_client
         }
 
         $connection = $this->connectToServer($host, $port);
-        $protocol_configured = $connection !== false && $this->configureProtocol($connection);
+        $connection_configured = $connection !== false && $this->configureTimeouts($connection);
+        $protocol_configured = $connection_configured && $this->configureProtocol($connection);
         $this->assertConnectionReady($connection, $protocol_configured);
 
         if (!$this->startTls($connection)) {
@@ -184,6 +190,16 @@ class Ldap_client
     protected function configureProtocol(mixed $connection): bool
     {
         return @ldap_set_option($connection, LDAP_OPT_PROTOCOL_VERSION, 3);
+    }
+
+    /**
+     * Bound connection establishment and synchronous LDAP operations before
+     * StartTLS or bind can perform network I/O.
+     */
+    protected function configureTimeouts(mixed $connection): bool
+    {
+        return @ldap_set_option($connection, LDAP_OPT_NETWORK_TIMEOUT, self::NETWORK_TIMEOUT_SECONDS) &&
+            @ldap_set_option($connection, LDAP_OPT_TIMEOUT, self::OPERATION_TIMEOUT_SECONDS);
     }
 
     protected function startTls(mixed $connection): bool
