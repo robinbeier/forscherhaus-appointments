@@ -43,6 +43,8 @@ final class CalendarProviderDataTest extends TestCase
             [
                 'email' => 'synthetic-calendar-provider@example.org',
                 'phone_number' => '+49111111111',
+                'mobile_number' => '+49222222222',
+                'address' => 'Synthetic Provider Street 1',
                 'notes' => 'synthetic-provider-note',
                 'ldap_dn' => 'synthetic-provider-ldap-dn',
             ],
@@ -164,12 +166,35 @@ final class CalendarProviderDataTest extends TestCase
     private function assertInitialProvider(array $provider): void
     {
         $this->assertSafeProvider($provider);
-        $this->assertArrayHasKey('timezone', $provider);
-        $this->assertArrayHasKey('services', $provider);
-        $this->assertArrayNotHasKey('email', $provider);
-        $this->assertArrayNotHasKey('phone_number', $provider);
-        $this->assertArrayNotHasKey('notes', $provider);
-        $this->assertArrayNotHasKey('ldap_dn', $provider);
+
+        $keys = array_keys($provider);
+        sort($keys);
+        $this->assertSame(
+            ['first_name', 'id', 'last_name', 'services', 'settings', 'timezone'],
+            $keys,
+            'Initial calendar providers must expose only the explicitly supported fields.',
+        );
+
+        foreach (
+            [
+                'email',
+                'phone_number',
+                'mobile_number',
+                'address',
+                'notes',
+                'ldap_dn',
+                'id_roles',
+                'is_private',
+                'create_datetime',
+                'update_datetime',
+                'password',
+                'salt',
+                'credential_version',
+            ]
+            as $sensitiveField
+        ) {
+            $this->assertArrayNotHasKey($sensitiveField, $provider);
+        }
     }
 
     private function providerFromEvent(array $response, string $key): array
