@@ -40,10 +40,7 @@ final class SettingsPostGuardTest extends TestCase
                 ];
             }
             if ($controller === 'Ldap_settings') {
-                $expected = [
-                    ['name' => 'ldap_is_active', 'value' => '1', 'extra' => 'drop-me'],
-                    ['name' => 'ldap_host', 'value' => 'ldap.synthetic.invalid', 'extra' => 'drop-me-too'],
-                ];
+                $expected = [['name' => 'ldap_is_active', 'value' => '1', 'extra' => 'drop-me']];
             }
             if ($controller === 'Legal_settings') {
                 $expected = [
@@ -58,14 +55,7 @@ final class SettingsPostGuardTest extends TestCase
                 ];
             }
             if ($controller === 'Matomo_analytics_settings') {
-                $expected = [
-                    [
-                        'name' => 'matomo_analytics_url',
-                        'value' => 'https://matomo.synthetic.invalid/',
-                        'extra' => 'drop-me',
-                    ],
-                    ['name' => 'matomo_analytics_site_id', 'value' => '7', 'extra' => 'drop-me-too'],
-                ];
+                $expected = [['name' => 'matomo_analytics_site_id', 'value' => '7', 'extra' => 'drop-me-too']];
             }
             if ($controller === 'Google_analytics_settings') {
                 $expected = [['name' => 'google_analytics_code', 'value' => 'G-SYNTHETIC', 'extra' => 'drop-me']];
@@ -114,7 +104,13 @@ final class SettingsPostGuardTest extends TestCase
                 $controller === 'General_settings' ? 0 : 1,
                 substr_count(
                     implode('|', $result['events']),
-                    $controller === 'Google_analytics_settings' ? 'save_batch:1' : 'save_batch:2',
+                    in_array(
+                        $controller,
+                        ['Ldap_settings', 'Google_analytics_settings', 'Matomo_analytics_settings'],
+                        true,
+                    )
+                        ? 'save_batch:1'
+                        : 'save_batch:2',
                 ),
                 $controller,
             );
@@ -169,7 +165,7 @@ final class SettingsPostGuardTest extends TestCase
 
     public function testPageAllowlistRejectsForeignSettingForGeneralAndBusiness(): void
     {
-        foreach (['General_settings', 'Business_settings'] as $controller) {
+        foreach (['General_settings', 'Business_settings', 'Matomo_analytics_settings'] as $controller) {
             $result = $this->probe($controller, 'malicious', 'POST');
             self::assertSame(500, $result['status'], $controller);
             self::assertContains('json_exception', $result['events'], $controller);
@@ -224,10 +220,7 @@ final class SettingsPostGuardTest extends TestCase
                 ];
             }
             if ($controller === 'Ldap_settings') {
-                $expected = [
-                    ['name' => 'ldap_is_active', 'value' => '1', 'extra' => 'drop-me'],
-                    ['name' => 'ldap_host', 'value' => 'ldap.synthetic.invalid', 'extra' => 'drop-me-too'],
-                ];
+                $expected = [['name' => 'ldap_is_active', 'value' => '1', 'extra' => 'drop-me']];
             }
             if ($controller === 'Legal_settings') {
                 $expected = [
@@ -242,14 +235,7 @@ final class SettingsPostGuardTest extends TestCase
                 ];
             }
             if ($controller === 'Matomo_analytics_settings') {
-                $expected = [
-                    [
-                        'name' => 'matomo_analytics_url',
-                        'value' => 'https://matomo.synthetic.invalid/',
-                        'extra' => 'drop-me',
-                    ],
-                    ['name' => 'matomo_analytics_site_id', 'value' => '7', 'extra' => 'drop-me-too'],
-                ];
+                $expected = [['name' => 'matomo_analytics_site_id', 'value' => '7', 'extra' => 'drop-me-too']];
             }
             if ($controller === 'Google_analytics_settings') {
                 $expected = [['name' => 'google_analytics_code', 'value' => 'G-SYNTHETIC', 'extra' => 'drop-me']];

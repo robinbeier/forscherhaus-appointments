@@ -20,7 +20,7 @@
  */
 class Ldap_settings extends EA_Controller
 {
-    private const LDAP_SETTING_NAMES = ['ldap_is_active', 'ldap_host', 'ldap_port'];
+    private const LDAP_SETTING_NAMES = ['ldap_is_active'];
 
     /**
      * Ldap_settings constructor.
@@ -74,6 +74,8 @@ class Ldap_settings extends EA_Controller
             'user_id' => $user_id,
             'role_slug' => $role_slug,
             'ldap_settings' => $ldap_settings,
+            'ldap_operator_host' => defined('Config::LDAP_HOST') ? Config::LDAP_HOST : '',
+            'ldap_operator_port' => defined('Config::LDAP_PORT') ? Config::LDAP_PORT : 0,
         ]);
 
         html_vars([

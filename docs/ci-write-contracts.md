@@ -328,16 +328,21 @@ und prüfen den unveränderten API-Token nach Ablehnung.
 Die Save-Aktionen von General-, LDAP-, Legal-, Business-, Booking-, Matomo-
 und Google-Analytics-Einstellungen prüfen zuerst die System-Settings-Edit-
 Berechtigung und verlangen anschließend POST vor DTO-Verarbeitung, Abfragen
-oder Speicherung. Andere Methoden erhalten nach erfolgreicher Berechtigungsprüfung
+oder Speicherung. `MATOMO_ANALYTICS_URL` ist ausschließlich als lokale
+`Config`-Konstante für Operatoren vorgesehen (nur HTTPS-Basis-URL ohne Query,
+Fragment oder Zugangsdaten); fehlt sie oder bleibt sie leer,
+bleibt Matomo deaktiviert. Die Backoffice-Maske und Settings-API dürfen nur die
+Site-ID speichern bzw. ausgeben. Andere Methoden erhalten nach erfolgreicher Berechtigungsprüfung
 405 mit `Allow: POST`. Die vorhandenen Oberflächen senden bereits POST.
 
 Die gemeinsame isolierte Controller-Matrix prüft Berechtigungsreihenfolge,
 Methodenablehnung und den unveränderten normalen Modell-Handoff mit Test-Doubles.
 Sie belegt keine echte HTTP-/CSRF-Verifikation. LDAP, Legal, Booking, Matomo und Google Analytics prüfen
 zusätzlich die aktuell gespeicherte Rolle des angemeldeten Nutzers. LDAP nimmt nur
-`ldap_is_active`, `ldap_host` und `ldap_port` an; Legal nur die sechs
+`ldap_is_active` an; Host und Port stammen aus der lokalen Operator-Konfiguration.
+Legal nimmt nur die sechs
 Rechtstext-Namen der Seite; Booking nur die 38 Buchungsfeld-Namen; Matomo nur
-`matomo_analytics_url` und `matomo_analytics_site_id`; Google Analytics nur
+`matomo_analytics_site_id`; Google Analytics nur
 `google_analytics_code`. Diese fünf verwerfen übermittelte IDs und zusätzliche
 Felder, lehnen fremde oder doppelte Namen vor dem Batch ab und übergeben nur
 `name` und `value` an `Settings_model::save_batch`. Ihre isolierten

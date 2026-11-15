@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Models;
 
+use InvalidArgumentException;
 use RuntimeException;
 use Tests\TestCase;
 use Admins_model;
@@ -189,6 +190,29 @@ final class AdminsModelAtomicWriteTest extends TestCase
         $this->adminsModel->save($stale);
 
         self::assertSame($before + 1, (int) $db->get_where('users', ['id' => $adminId])->row('credential_version'));
+    }
+
+    public function test_short_new_admin_password_is_rejected_before_mutation(): void
+    {
+        $admin = $this->adminData();
+        $admin['settings']['password'] = str_repeat('a', MIN_PASSWORD_LENGTH - 1);
+
+        try {
+            $this->adminsModel->save($admin);
+            $this->fail('Expected a short administrator password to be rejected.');
+        } catch (InvalidArgumentException $exception) {
+            $this->assertSame(
+                'The admin password must be at least ' . MIN_PASSWORD_LENGTH . ' characters long.',
+                $exception->getMessage(),
+            );
+        }
+
+        $this->assertSame(
+            0,
+            get_instance()
+                ->db->get_where('users', ['email' => $admin['email']])
+                ->num_rows(),
+        );
     }
 
     public function test_settings_failure_after_real_mutation_rolls_back_insert_and_update(): void

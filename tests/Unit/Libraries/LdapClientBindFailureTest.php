@@ -34,6 +34,11 @@ class LdapClientBindFailureTest extends TestCase
                 return $this->establishSecureConnection($host, $port);
             }
 
+            public function assertConfiguredEndpoint(): array
+            {
+                return $this->configuredEndpoint();
+            }
+
             protected function setTlsCertificateVerification(): bool
             {
                 $this->calls[] = 'certificate-verification';
@@ -126,6 +131,53 @@ class LdapClientBindFailureTest extends TestCase
             ['certificate-verification', ['connect', 'ldap.example.invalid', 389], 'timeouts', 'protocol', 'start-tls'],
             $client->calls,
         );
+    }
+
+    public function testMissingOperatorEndpointFailsClosedBeforeAnyConnection(): void
+    {
+        $script = <<<'PHP'
+        define('BASEPATH', 'test');
+        class Config {}
+        require %s;
+        $client = new class extends Ldap_client {
+            public function endpoint(): array { return $this->configuredEndpoint(); }
+            public function __construct() {}
+        };
+        try {
+            $client->endpoint();
+            echo 'unexpected-success';
+        } catch (LdapOperationalException $exception) {
+            echo $exception->getMessage();
+        }
+        PHP;
+        $command =
+            PHP_BINARY .
+            ' -r ' .
+            escapeshellarg(sprintf($script, var_export(APPPATH . 'libraries/Ldap_client.php', true)));
+        $output = shell_exec($command);
+
+        self::assertSame('LDAP endpoint is not configured.', $output);
+    }
+
+    public function testConfiguredOperatorEndpointUsesActualConfigConstants(): void
+    {
+        $script = <<<'PHP'
+        define('BASEPATH', 'test');
+        class Config { public const LDAP_HOST = 'operator-pinned.example.test'; public const LDAP_PORT = 1636; }
+        require %s;
+        $client = new class extends Ldap_client {
+            public function endpoint(): array { return $this->configuredEndpoint(); }
+            public function __construct() {}
+        };
+        echo json_encode($client->endpoint(), JSON_THROW_ON_ERROR);
+        PHP;
+        $command =
+            PHP_BINARY .
+            ' -r ' .
+            escapeshellarg(sprintf($script, var_export(APPPATH . 'libraries/Ldap_client.php', true)));
+        $output = shell_exec($command);
+
+        self::assertSame('["operator-pinned.example.test",1636]', $output);
     }
 
     public function testFailedStartTlsIsOperationalFailureBeforeBindCanBeAttempted(): void

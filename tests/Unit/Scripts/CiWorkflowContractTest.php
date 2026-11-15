@@ -501,7 +501,12 @@ class CiWorkflowContractTest extends TestCase
             Yaml::PARSE_CUSTOM_TAGS,
         );
         self::assertSame('docker/php-fpm', $base['services']['php-fpm']['build']);
-        self::assertArrayNotHasKey('php-fpm', $ci['services'] ?? []);
+        self::assertArrayHasKey('php-fpm', $ci['services'] ?? []);
+        self::assertContains(
+            './docker/config.ci.php:/var/www/html/config.php:ro',
+            $ci['services']['php-fpm']['volumes'] ?? [],
+        );
+        self::assertArrayNotHasKey('ports', $ci['services']['php-fpm']);
         self::assertArrayNotHasKey('build', $zeroSurprise['services']['php-fpm'] ?? []);
 
         $steps = $this->namedSteps($this->workflowJob('calendar-canary-regressions'));

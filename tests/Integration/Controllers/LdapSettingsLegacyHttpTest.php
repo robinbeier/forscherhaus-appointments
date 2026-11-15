@@ -117,23 +117,18 @@ final class LdapSettingsLegacyHttpTest extends TestCase
             self::assertSame(200, $response->statusCode, $path . ' ' . $response->body);
             self::assertStringContainsString('id="ldap-settings-page"', $response->body, $path);
             self::assertStringContainsString('id="ldap-is-active"', $response->body, $path);
+            self::assertStringContainsString('id="ldap-host"', $response->body, $path);
+            self::assertStringContainsString('id="ldap-port"', $response->body, $path);
+            self::assertStringContainsString('readonly', $response->body, $path);
         }
 
         $foreign = $fixture->ownedSetting('foreign', 'before');
-        $replacement = [
-            ['name' => 'ldap_is_active', 'value' => '1', 'id' => $foreign['id'], 'extra' => 'discard-me'],
-            ['name' => 'ldap_host', 'value' => $fixture->run . '.ldap.synthetic.invalid', 'extra' => 'discard-me-too'],
-            ['name' => 'ldap_port', 'value' => '1636'],
-        ];
+        $replacement = [['name' => 'ldap_is_active', 'value' => '1', 'id' => $foreign['id'], 'extra' => 'discard-me']];
         $saved = $admin->post('ldap_settings/save', ['ldap_settings' => $replacement]);
         self::assertSame(200, $saved->statusCode, $saved->body);
         $db = get_instance()->db;
         self::assertSame('1', $db->get_where('settings', ['name' => 'ldap_is_active'])->row_array()['value'] ?? null);
-        self::assertSame(
-            $fixture->run . '.ldap.synthetic.invalid',
-            $db->get_where('settings', ['name' => 'ldap_host'])->row_array()['value'] ?? null,
-        );
-        self::assertSame('1636', $db->get_where('settings', ['name' => 'ldap_port'])->row_array()['value'] ?? null);
+        self::assertSame('', $saved->body);
         self::assertSame($foreign, $fixture->settingRow((int) $foreign['id']));
     }
 
@@ -241,7 +236,7 @@ final class LdapSettingsLegacyHttpTest extends TestCase
             $saved = $admin->post('ldap_settings/save', [
                 'ldap_settings' => [['name' => 'ldap_host', 'value' => $fixture->run . '.promoted.invalid']],
             ]);
-            self::assertSame(200, $saved->statusCode, $saved->body);
+            self::assertSame(500, $saved->statusCode, $saved->body);
         } finally {
             $db->update('users', ['id_roles' => $this->actorSnapshot['id_roles']], ['id' => $fixture->actorId]);
         }

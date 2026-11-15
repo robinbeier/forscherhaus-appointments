@@ -221,12 +221,9 @@ try {
             $logMarker = 'LDAP authentication unavailable; login rejected.';
             $markerCountBefore = dashboardIntegrationSmokeCountLogMarker($repoRoot, $logMarker);
 
-            $response = dashboardIntegrationSmokeWithLdapSettings(
+            $response = dashboardIntegrationSmokeWithMalformedLdapDn(
                 $repoRoot,
-                [
-                    'ldap_host' => '127.0.0.1',
-                    'ldap_port' => '1',
-                ],
+                $config['ldap_guardrail_username'],
                 static fn() => $ldapClient->post(
                     'login/validate',
                     [
@@ -1120,32 +1117,44 @@ function dashboardIntegrationSmokeCountLogMarker(string $repoRoot, string $marke
 }
 
 /**
- * Run a bounded LDAP check with temporary settings and restore them afterward.
- *
- * @param array<string, string> $overrides
+ * Force an LDAP protocol error through a synthetic malformed DN and restore it.
  */
-function dashboardIntegrationSmokeWithLdapSettings(string $repoRoot, array $overrides, callable $callback): mixed
+function dashboardIntegrationSmokeWithMalformedLdapDn(string $repoRoot, string $username, callable $callback): mixed
 {
     $CI = dashboardIntegrationSmokeBootstrapApplication($repoRoot);
-    $names = ['ldap_is_active', 'ldap_host', 'ldap_port'];
-    $snapshot = $CI->db->where_in('name', $names)->get('settings')->result_array();
+    $user = $CI->db
+        ->select('users.*')
+        ->from('users')
+        ->join('user_settings', 'user_settings.id_users = users.id', 'inner')
+        ->where('user_settings.username', $username)
+        ->get()
+        ->row_array();
+
+    if (empty($user['id'])) {
+        throw new RuntimeException('LDAP smoke fixture user was not found.');
+    }
+
+    $userId = (int) $user['id'];
 
     try {
-        setting($overrides);
+        if (!$CI->db->update('users', ['ldap_dn' => 'not-a-distinguished-name'], ['id' => $userId])) {
+            throw new RuntimeException('LDAP smoke could not write the malformed DN fixture.');
+        }
+
+        $mutated = $CI->db->get_where('users', ['id' => $userId])->row_array();
+        if (($mutated['ldap_dn'] ?? null) !== 'not-a-distinguished-name') {
+            throw new RuntimeException('LDAP smoke malformed DN fixture was not persisted.');
+        }
 
         return $callback();
     } finally {
-        $snapshotByName = [];
-        foreach ($snapshot as $row) {
-            $snapshotByName[(string) $row['name']] = $row;
+        if (!$CI->db->update('users', ['ldap_dn' => $user['ldap_dn'] ?? null], ['id' => $userId])) {
+            throw new RuntimeException('LDAP smoke could not restore the fixture DN.');
         }
 
-        foreach ($names as $name) {
-            if (isset($snapshotByName[$name])) {
-                $CI->db->update('settings', ['value' => $snapshotByName[$name]['value']], ['name' => $name]);
-            } else {
-                $CI->db->delete('settings', ['name' => $name]);
-            }
+        $restored = $CI->db->get_where('users', ['id' => $userId])->row_array();
+        if (($restored['ldap_dn'] ?? null) !== ($user['ldap_dn'] ?? null)) {
+            throw new RuntimeException('LDAP smoke fixture DN restore was not verified.');
         }
     }
 }
@@ -1787,7 +1796,7 @@ function dashboardIntegrationSmokePrepareLdapAppGuardrailFixture(string $repoRoo
     $guardrailExpectedDn = 'uid=ada,ou=people,dc=example,dc=org';
     $guardrailExpectedMail = 'ada.lovelace@example.org';
 
-    $settingNames = ['ldap_is_active', 'ldap_host', 'ldap_port'];
+    $settingNames = ['ldap_is_active'];
     $settingSnapshot = $CI->db->where_in('name', $settingNames)->get('settings')->result_array();
 
     $existingUser = $CI->db
@@ -1859,11 +1868,7 @@ function dashboardIntegrationSmokePrepareLdapAppGuardrailFixture(string $repoRoo
         );
     }
 
-    setting([
-        'ldap_is_active' => '1',
-        'ldap_host' => 'openldap',
-        'ldap_port' => '389',
-    ]);
+    setting(['ldap_is_active' => '1']);
 
     $admin = [
         'first_name' => 'Ada',

@@ -52,14 +52,18 @@
                                 <label class="form-label" for="ldap-host">
                                     <?= lang('host') ?>
                                 </label>
-                                <input id="ldap-host" class="form-control" data-field="ldap_host">
+                                <input id="ldap-host" class="form-control" value="<?= html_escape(
+                                    (string) ($ldap_operator_host ?? ''),
+                                ) ?>" readonly>
                             </div>
 
                             <div class="mb-3">
                                 <label class="form-label" for="ldap-port">
                                     <?= lang('port') ?>
                                 </label>
-                                <input id="ldap-port" class="form-control" data-field="ldap_port">
+                                <input id="ldap-port" class="form-control" value="<?= html_escape(
+                                    (string) ($ldap_operator_port ?? ''),
+                                ) ?>" readonly>
                             </div>
                         </div>
                     </div>

@@ -90,7 +90,7 @@ final class AccountPasswordChangeHttpTest extends TestCase
             ]
             as [$path, $client]
         ) {
-            $newPassword = $path === 'account/save' ? 'valid77' : $this->fixture->run . '_new_alias';
+            $newPassword = $path === 'account/save' ? 'valid-password-77' : $this->fixture->run . '_new_alias';
             $admin = $this->login($client, $oldPassword);
             $account = $this->accountPayload($this->actorBefore, $this->actorSettingsBefore);
             $account['id'] = (string) $this->fixture->providerId;
@@ -146,7 +146,7 @@ final class AccountPasswordChangeHttpTest extends TestCase
         $serverLog = file_get_contents($this->server->directory . '/server.log');
         self::assertIsString($serverLog);
         self::assertStringNotContainsString($this->credentials['password'], $serverLog);
-        self::assertStringNotContainsString('valid77', $serverLog);
+        self::assertStringNotContainsString('valid-password-77', $serverLog);
         self::assertStringNotContainsString($this->fixture->run . '_new_alias', $serverLog);
     }
 
@@ -156,7 +156,7 @@ final class AccountPasswordChangeHttpTest extends TestCase
         self::assertNotNull($this->server);
 
         // Form encoding normalizes non-string scalar/list types; those are covered by direct model tests.
-        $values = ['0', 'a', 'ab', 'abc', 'abcd', 'abcde', 'abcdef'];
+        $values = ['0', 'a', 'ab', 'abc', 'abcd', 'abcde', 'abcdef', str_repeat('a', MIN_PASSWORD_LENGTH - 1)];
         foreach (['account/save', 'index.php/account/save'] as $path) {
             foreach ($values as $value) {
                 $admin = $this->login(

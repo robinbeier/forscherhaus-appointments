@@ -37,6 +37,13 @@ class Config
     const DEBUG_MODE = false;
     const RATE_LIMITING = true;
     const WEBMCP_BOOKING_PILOT_ENABLED = false;
+    // Leave empty to keep Matomo disabled. This is intentionally not a setting
+    // because the value becomes an executable public-page script destination.
+    const MATOMO_ANALYTICS_URL = '';
+
+    // LDAP bind destinations are local operator configuration, never database settings.
+    const LDAP_HOST = '';
+    const LDAP_PORT = 0;
 
     // ------------------------------------------------------------------------
     // DATABASE SETTINGS

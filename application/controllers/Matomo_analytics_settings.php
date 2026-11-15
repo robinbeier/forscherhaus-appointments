@@ -20,7 +20,7 @@
  */
 class Matomo_analytics_settings extends EA_Controller
 {
-    private const MATOMO_SETTING_NAMES = ['matomo_analytics_url', 'matomo_analytics_site_id'];
+    private const MATOMO_SETTING_NAMES = ['matomo_analytics_site_id'];
 
     /**
      * Matomo_analytics_settings constructor.

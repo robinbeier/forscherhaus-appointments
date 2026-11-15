@@ -1787,10 +1787,12 @@ function waitForHttpReadiness(array $command, string $repoRoot, string $name = '
 {
     $maxAttempts = 60;
     $startedAt = microtime(true);
+    $lastDiagnostics = ['curl_exit_code' => null, 'http_status_code' => null];
 
     for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
         $result = GateProcessRunner::run($command, $repoRoot, null, 15);
         $statusCode = trim((string) ($result['stdout'] ?? ''));
+        $lastDiagnostics = httpReadinessDiagnostics($result);
 
         if ((int) ($result['exit_code'] ?? 1) === 0 && $statusCode === '200') {
             return [
@@ -1811,6 +1813,25 @@ function waitForHttpReadiness(array $command, string $repoRoot, string $name = '
         'status' => ZeroSurpriseReport::STATUS_FAIL,
         'attempts' => $maxAttempts,
         'duration_ms' => round((microtime(true) - $startedAt) * 1000, 2),
+        // Numeric curl/HTTP outcomes are safe to retain; response bodies,
+        // hostnames and stderr can contain private runtime configuration.
+        'last_curl_exit_code' => $lastDiagnostics['curl_exit_code'],
+        'last_http_status_code' => $lastDiagnostics['http_status_code'],
+    ];
+}
+
+/**
+ * @param array<string, mixed> $result
+ * @return array{curl_exit_code: ?int, http_status_code: ?int}
+ */
+function httpReadinessDiagnostics(array $result): array
+{
+    $exitCode = $result['exit_code'] ?? null;
+    $statusCode = trim((string) ($result['stdout'] ?? ''));
+
+    return [
+        'curl_exit_code' => is_int($exitCode) && $exitCode >= 0 && $exitCode <= 255 ? $exitCode : null,
+        'http_status_code' => preg_match('/^[0-9]{3}$/D', $statusCode) === 1 ? (int) $statusCode : null,
     ];
 }
 

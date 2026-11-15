@@ -166,25 +166,17 @@ final class MatomoAnalyticsLegacyHttpTest extends TestCase
                     $actual[] = $setting['name'];
                 }
                 sort($actual);
-                $expected = self::MATOMO_NAMES;
-                sort($expected);
-                self::assertSame($expected, $actual, $path);
+                self::assertSame(['matomo_analytics_site_id'], $actual, $path);
             }
 
             $foreign = $fixture->ownedSetting('foreign', 'before');
             $payload = [
-                [
-                    'name' => self::MATOMO_NAMES[0],
-                    'value' => $fixture->run . '.matomo.synthetic.invalid',
-                    'id' => $foreign['id'],
-                    'extra' => 'discard',
-                ],
-                ['name' => self::MATOMO_NAMES[1], 'value' => '7654', 'extra' => 'discard'],
+                ['name' => self::MATOMO_NAMES[1], 'value' => '7654', 'id' => $foreign['id'], 'extra' => 'discard'],
             ];
             $saved = $admin->post('matomo_analytics_settings/save', ['matomo_analytics_settings' => $payload]);
             self::assertSame(200, $saved->statusCode, $saved->body);
             self::assertSame(
-                $fixture->run . '.matomo.synthetic.invalid',
+                $this->matomoSnapshots[self::MATOMO_NAMES[0]]['value'],
                 $this->matomoRows()[self::MATOMO_NAMES[0]]['value'],
             );
             self::assertSame('7654', $this->matomoRows()[self::MATOMO_NAMES[1]]['value']);
@@ -272,8 +264,8 @@ final class MatomoAnalyticsLegacyHttpTest extends TestCase
                     ['name' => $foreign['name'], 'value' => 'after', 'id' => $foreign['id']],
                 ],
                 [
-                    ['name' => self::MATOMO_NAMES[0], 'value' => 'first'],
-                    ['name' => self::MATOMO_NAMES[0], 'value' => 'second'],
+                    ['name' => self::MATOMO_NAMES[1], 'value' => 'first'],
+                    ['name' => self::MATOMO_NAMES[1], 'value' => 'second'],
                 ],
                 [['name' => 'matomo_unknown_synthetic', 'value' => 'unknown', 'id' => $foreign['id']]],
             ]
@@ -412,10 +404,7 @@ final class MatomoAnalyticsLegacyHttpTest extends TestCase
                 CURLOPT_POST => true,
                 CURLOPT_POSTFIELDS => http_build_query(
                     [
-                        'matomo_analytics_settings' => [
-                            ['name' => self::MATOMO_NAMES[0], 'value' => $this->fixture->run . '_race_url'],
-                            ['name' => self::MATOMO_NAMES[1], 'value' => '8765'],
-                        ],
+                        'matomo_analytics_settings' => [['name' => self::MATOMO_NAMES[1], 'value' => '8765']],
                         'csrf_token' => $csrf,
                     ],
                     '',

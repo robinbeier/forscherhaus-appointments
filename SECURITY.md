@@ -26,9 +26,10 @@ Ownership labels do not demonstrate an independent security review.
   credentials, and evidence have their own trust boundary and require review.
   A successful tool run does not establish the application's security by itself.
 
-Self-service password changes enforce the existing `MIN_PASSWORD_LENGTH` in
-the shared user model before any mutation. Missing or empty passwords on an
-update preserve the verifier; other supplied values must be strings meeting
+Self-service password changes enforce the `MIN_PASSWORD_LENGTH` policy (12
+characters for new and changed passwords) in the shared user model before any
+mutation. Missing or empty passwords on an update preserve the verifier; other
+supplied values must be strings meeting
 the policy. Recovery and authentication continue using their existing verifier
 contracts. `AccountPasswordChangeHttpTest` and `UsersModelAtomicWriteTest`
 cover the account path and atomic rejection, not the strength of existing passwords.
@@ -40,9 +41,9 @@ exceptions returned through `json_exception()`. Protected logs retain diagnostic
 The isolated account failure regression proves rollback after a real write;
 the renderer matrix separately covers development, testing, production, and CLI.
 
-Local password format changes require a verified dual-reader release before
-modern writes are enabled. Preserve the accepted password length and invalidate
-an authentication decision if its credential snapshot changes during verification.
+Existing password hashes remain valid; the stronger minimum applies only when a
+new account is created or a password is changed. Invalidate an authentication
+decision if its credential snapshot changes during verification.
 See [the reader-first rollout](docs/security/password-verifier-rollout.md) for
 the rollback floor and the limits of gradual rehashing.
 
