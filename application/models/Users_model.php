@@ -135,6 +135,13 @@ class Users_model extends EA_Model
                 $this->db->trans_rollback();
             }
 
+            if (
+                (int) $exception->getCode() === 1062 &&
+                str_contains($exception->getMessage(), 'uq_user_settings_username')
+            ) {
+                throw new InvalidArgumentException('The username is already used by another account.', 0, $exception);
+            }
+
             throw $exception;
         }
     }
@@ -169,6 +176,16 @@ class Users_model extends EA_Model
         $settings = $user['settings'] ?? null;
         if (!is_array($settings)) {
             throw new InvalidArgumentException('The settings argument must be an array.');
+        }
+
+        if (array_key_exists('username', $settings)) {
+            $username = $settings['username'];
+            if (
+                !is_string($username) ||
+                ($username !== '' && !$this->validate_username($username, (int) ($user['id'] ?? 0)))
+            ) {
+                throw new InvalidArgumentException('The username is already used by another account.');
+            }
         }
 
         $is_insert = empty($user['id']);

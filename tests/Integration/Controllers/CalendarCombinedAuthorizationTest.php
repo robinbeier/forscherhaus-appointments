@@ -828,6 +828,7 @@ final class CalendarCombinedAuthorizationTest extends TestCase
         if ($settings) {
             unset($settings['id']);
             $settings['id_users'] = $id;
+            $settings['username'] = 'combined-provider-' . bin2hex(random_bytes(8));
             get_instance()->db->insert('user_settings', $settings);
         }
         get_instance()->db->insert('services_providers', ['id_users' => $id, 'id_services' => $service]);
@@ -852,6 +853,7 @@ final class CalendarCombinedAuthorizationTest extends TestCase
             ->row_array();
         unset($settings['id']);
         $settings['id_users'] = $id;
+        $settings['username'] = 'combined-secretary-' . bin2hex(random_bytes(8));
         get_instance()->db->insert('user_settings', $settings);
         get_instance()->db->insert('secretaries_providers', [
             'id_users_secretary' => $id,

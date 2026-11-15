@@ -120,6 +120,10 @@ pending changes. A passing replay alone does not prove the live schema is ready.
 
 For a release with pending migrations:
 
+Migration 073 requires MySQL 8.4+ or MariaDB 11.8+. On an older server,
+back up and upgrade the database first, then rehearse the pending migrations
+against a restored backup; the migration refuses the older version before DDL.
+
 1. Review and rehearse the exact migration delta against a restored backup.
    Verify a fresh production backup and successful restoration before any live
    database write. Decide whether the previous application can still run against

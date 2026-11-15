@@ -54,14 +54,16 @@ $ci->timezones = new class {
 };
 $format = $argv[1] ?? 'legacy';
 $rotate = ($argv[3] ?? '') === 'reset';
-$ci->db = new class ($format, $rotate) {
+$mode = $argv[4] ?? '';
+$duplicate = $mode === 'duplicate';
+$ci->db = new class ($format, $rotate, $duplicate) {
     public array $row;
     public int $reads = 0;
     public int $affected = 0;
     public array $predicate = [];
     /** @var array<string, mixed> */
     private array $queryWhere = [];
-    public function __construct(string $format, private bool $rotate)
+    public function __construct(string $format, private bool $rotate, private bool $duplicate)
     {
         $this->row = [
             'id_users' => 1,
@@ -106,6 +108,10 @@ $ci->db = new class ($format, $rotate) {
         }
         return $this;
     }
+    public function limit(int $limit): self
+    {
+        return $this;
+    }
     public function get(): object
     {
         ++$this->reads;
@@ -119,11 +125,15 @@ $ci->db = new class ($format, $rotate) {
             $this->row['password'] = hash_password_argon2id('replacement-password');
             $this->rotate = false;
         }
-        return new class ($row) {
-            public function __construct(private array $row) {}
+        return new class ($row, $this->duplicate && $this->reads === 1) {
+            public function __construct(private array $row, private bool $duplicate) {}
             public function row_array(): array
             {
                 return $this->row;
+            }
+            public function result_array(): array
+            {
+                return $this->duplicate ? [$this->row, $this->row] : ($this->row === [] ? [] : [$this->row]);
             }
         };
     }
@@ -145,11 +155,14 @@ $ci->db = new class ($format, $rotate) {
     }
 };
 require dirname(__DIR__, 2) . '/application/libraries/Accounts.php';
-$result = (new Accounts())->check_login('synthetic', 'old-password');
+$started = hrtime(true);
+$result = (new Accounts())->check_login($mode === 'unknown' ? 'missing' : 'synthetic', 'old-password');
+$elapsedNs = hrtime(true) - $started;
 echo json_encode(
     [
         'authenticated' => $result !== null,
         'reads' => $ci->db->reads,
+        'elapsed_ns' => $elapsedNs,
         'replacement_preserved' => verify_password(
             $ci->db->row['password'],
             $ci->db->row['salt'],

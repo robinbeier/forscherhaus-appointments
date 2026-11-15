@@ -238,6 +238,7 @@ final class CalendarUnavailabilityRaceTest extends TestCase
         $CI->db->insert('users', $source);
         $id = (int) $CI->db->insert_id();
         $settings['id_users'] = $id;
+        $settings['username'] = 'calendar-race-' . bin2hex(random_bytes(8));
         $CI->db->insert('user_settings', $settings);
         return $id;
     }

@@ -171,6 +171,25 @@ final class StaffSettingsApiHttpTest extends TestCase
         }
     }
 
+    public function testSettingsApiRejectsStoredThemeMarkupAndLeavesThemeUnchanged(): void
+    {
+        $db = get_instance()->db;
+        $before = $db->get_where('settings', ['name' => 'theme'])->row_array();
+        self::assertNotEmpty($before['id'] ?? null);
+
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $response = $admin->requestJsonApp('PUT', 'api/v1/settings/theme', [
+            'value' => 'default" onerror="alert(1)',
+        ]);
+
+        self::assertSame(500, $response->statusCode);
+        self::assertSame(
+            ['success' => false, 'message' => 'The selected theme is not available.'],
+            json_decode($response->body, true, 512, JSON_THROW_ON_ERROR),
+        );
+        self::assertSame($before, $db->get_where('settings', ['name' => 'theme'])->row_array());
+    }
+
     public function testSettingsApiPaginatesAfterRemovingSecretRows(): void
     {
         $response = $this->basicClient($this->credentials['admin_username'], $this->credentials['password'])->get(

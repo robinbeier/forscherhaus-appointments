@@ -950,6 +950,7 @@ final class TwoConnectionWriteContractTest extends TestCase
         $settings = $db->get_where('user_settings', ['id_users' => $sourceId])->row_array();
         unset($settings['id']);
         $settings['id_users'] = $id;
+        $settings['username'] = 'two-connection-' . bin2hex(random_bytes(8));
         $db->insert('user_settings', $settings);
         $db->insert('services_providers', ['id_users' => $id, 'id_services' => $serviceId]);
         return $id;

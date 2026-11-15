@@ -238,6 +238,7 @@ final class BookingAvailableHoursFutureLimitTest extends ApplicationTestCase
                 $copy = $settings;
                 unset($copy['id']);
                 $copy['id_users'] = $id;
+                $copy['username'] = 'rob727-' . bin2hex(random_bytes(8));
                 $CI->db->insert('user_settings', $copy);
             }
             $CI->db->insert('services_providers', ['id_users' => $id, 'id_services' => $this->serviceId]);
