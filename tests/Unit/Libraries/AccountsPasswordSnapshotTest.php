@@ -32,12 +32,15 @@ final class AccountsPasswordSnapshotTest extends TestCase
         }
     }
 
-    public function testAmbiguousDuplicateUsernameFails_closed_before_password_verification(): void
+    public function testUnknownAndAmbiguousUsernameStillRunPasswordVerificationWork(): void
     {
-        $result = $this->probe('legacy', 'reader', 'stable', 'duplicate');
-
-        self::assertFalse($result['authenticated']);
-        self::assertSame(1, $result['reads']);
+        foreach (['unknown', 'duplicate'] as $mode) {
+            $result = $this->probe('legacy', 'reader', 'stable', $mode);
+            self::assertFalse($result['authenticated'], $mode);
+            self::assertSame(1, $result['reads'], $mode);
+            // A bypass returns in microseconds; both KDFs take measurable work.
+            self::assertGreaterThan(1_000_000, $result['elapsed_ns'], $mode);
+        }
     }
 
     private function probe(string $format, string $phase, string $change, string $mode = ''): array

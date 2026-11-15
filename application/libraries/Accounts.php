@@ -66,6 +66,9 @@ class Accounts
         // Authentication must never choose an arbitrary row when the
         // username invariant is absent or being repaired.
         if (count($matches) !== 1) {
+            // Keep the same legacy and Argon2id work as an invalid password
+            // for an existing account, including when duplicate rows exist.
+            $this->verify_login_password('', '', $password);
             return null;
         }
 

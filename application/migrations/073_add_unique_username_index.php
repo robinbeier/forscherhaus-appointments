@@ -12,6 +12,8 @@ class Migration_Add_unique_username_index extends EA_Migration
             return;
         }
 
+        $this->assertSupportedServer();
+
         $duplicates = $this->db->query(
             'SELECT `username` FROM `' .
                 $this->db->dbprefix(self::TABLE) .
@@ -67,6 +69,8 @@ class Migration_Add_unique_username_index extends EA_Migration
         if (!$this->db->table_exists(self::TABLE)) {
             return;
         }
+
+        $this->assertSupportedServer();
         $rows = $this->indexRows();
         if ($rows !== [] && !$this->isExpectedIndex($rows)) {
             return;
@@ -108,6 +112,27 @@ class Migration_Add_unique_username_index extends EA_Migration
             throw new RuntimeException('Could not inspect the username index.');
         }
         return $query->result_array();
+    }
+
+    private function assertSupportedServer(): void
+    {
+        $query = $this->db->query('SELECT VERSION() AS server_version');
+        $version = $query === false ? '' : (string) ($query->row_array()['server_version'] ?? '');
+        $isMariaDb = stripos($version, 'mariadb') !== false;
+        if ($isMariaDb && str_starts_with($version, '5.5.5-')) {
+            $version = substr($version, 6);
+        }
+        if (!preg_match('/\A(\d+)\.(\d+)\.(\d+)/', $version, $matches)) {
+            throw new RuntimeException('Could not verify the database version for username uniqueness.');
+        }
+
+        $serverVersion = $matches[1] . '.' . $matches[2] . '.' . $matches[3];
+        $minimum = $isMariaDb ? '11.8.0' : '8.4.0';
+        if (version_compare($serverVersion, $minimum, '<')) {
+            throw new RuntimeException(
+                'Username uniqueness requires MySQL 8.4+ or MariaDB 11.8+; upgrade the database before migration 073.',
+            );
+        }
     }
 
     private function isExpectedGeneratedColumn(): bool

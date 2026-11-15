@@ -93,7 +93,15 @@ PHP-FPM container, and Composer test scripts create it from
 local credentials and other secrets out of version control.
 
 In the host machine the server is accessible from `http://localhost` and the database from `localhost:3306`.
-The development stack pins MySQL `8.4.8` in `docker-compose.yml` for CI parity, while application migrations remain compatible with MySQL `5.7+`.
+The development stack pins MySQL `8.4.8` in `docker-compose.yml` for CI parity.
+Migration 073 requires MySQL `8.4+` or MariaDB `11.8+` because its invisible
+generated column must not appear in existing `SELECT *` application paths.
+Older installations must back up and upgrade their database to one of these
+versions before running migration 073, then rehearse the migration against a
+restored backup. The migration checks the server version before changing the
+schema and stops on older or unrecognized versions. Earlier migrations retain
+their prior MySQL 5.7 compatibility; this release raises the database baseline
+for new upgrades.
 
 ### Node.js security baseline
 

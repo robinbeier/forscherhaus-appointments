@@ -43,6 +43,30 @@ final class UniqueUsernameIndexMigrationTest extends TestCase
         $this->assertSame([], $db->alterQueries);
     }
 
+    public function testOldMysqlStopsBeforeAnySchemaChange(): void
+    {
+        $db = new FakeUniqueUsernameMigrationDb();
+        $db->serverVersion = '5.7.44';
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('requires MySQL 8.4+');
+        try {
+            $this->createMigration($db)->up();
+        } finally {
+            $this->assertSame([], $db->alterQueries);
+        }
+    }
+
+    public function testSupportedMariaDbVersionAcceptsCompatibilityPrefix(): void
+    {
+        $db = new FakeUniqueUsernameMigrationDb();
+        $db->serverVersion = '5.5.5-11.8.3-MariaDB-0ubuntu0.26.04.1';
+
+        $this->createMigration($db)->up();
+
+        $this->assertCount(2, $db->alterQueries);
+    }
+
     public function testDownDropsOnlyTheExpectedUniqueIndex(): void
     {
         $db = new FakeUniqueUsernameMigrationDb();
@@ -110,6 +134,7 @@ final class UniqueUsernameIndexMigrationTest extends TestCase
 
 final class FakeUniqueUsernameMigrationDb
 {
+    public string $serverVersion = '8.4.8';
     public array $alterQueries = [];
     public array $duplicateRows = [];
     public array $indexRows = [];
@@ -141,6 +166,9 @@ final class FakeUniqueUsernameMigrationDb
 
     public function query(string $sql): mixed
     {
+        if ($sql === 'SELECT VERSION() AS server_version') {
+            return new FakeUniqueUsernameQuery([['server_version' => $this->serverVersion]]);
+        }
         if (str_starts_with($sql, 'SELECT `DATA_TYPE`')) {
             return new FakeUniqueUsernameQuery(
                 $this->generatedColumnExists
