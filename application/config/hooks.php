@@ -37,6 +37,16 @@ $hook['pre_controller'] = static function (): void {
     if ($cachePath === '') {
         $cachePath = APPPATH . 'cache' . DIRECTORY_SEPARATOR;
     }
+    if ($controller === 'booking' && strtolower((string) ($uri->rsegments[2] ?? '')) === 'get_unavailable_dates') {
+        Early_rate_limit::enforce(
+            $ip,
+            20,
+            120,
+            $cachePath,
+            'booking_unavailable_dates_rate_limit_key_',
+            'booking_unavailable_dates_rate_limit_tmp_',
+        );
+    }
     Early_rate_limit::enforce($ip, 100, 120, $cachePath);
 };
 
