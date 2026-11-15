@@ -59,15 +59,16 @@ run_case() {
         printf '%s\n' 'PROD_SSH_TARGET=root@synthetic.invalid' \
             'REMOTE_BACKUP_ROOT=/root/backups/easyappointments' \
             'REMOTE_BACKUP_DIR=' \
-            "SSH_KNOWN_HOSTS_FILE=$known_hosts_root/known_hosts" \
             'SSH_OPTIONS=(-o synthetic)' \
             'LOCAL_DB_NAME=easyappointments' \
             'log() { :; }' \
             "$function_body" \
             "$parse_body" \
             "$create_body"
+        printf 'SSH_KNOWN_HOSTS_FILE=%q\n' "$known_hosts_root/known_hosts"
         printf 'export SSH_FIXTURE_ROOT=%q\n' "$workspace/remote"
         printf 'printf synthetic-host-key > %q\n' "$known_hosts_root/known_hosts"
+        printf 'chmod 0600 %q\n' "$known_hosts_root/known_hosts"
         printf '%s\n' "$body"
     } > "$runner"
     chmod 0700 "$runner"
