@@ -125,7 +125,7 @@ runner, as the main test job already does. Only MySQL runs in Compose. Its
 local `config.php` points to `127.0.0.1`; the repository sample remains unchanged
 for normal Docker development.
 
-After database readiness, `php index.php console install` creates the seeded
+After database readiness, `php index.php console install fixture` creates the seeded
 instance using the existing bounded retry loop. Installation failure stops
 the job before coverage runs. Diagnostics and unconditional Compose cleanup
 remain in place. The coverage shards install their own locked Composer

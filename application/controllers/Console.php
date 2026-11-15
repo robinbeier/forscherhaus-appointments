@@ -53,13 +53,31 @@ class Console extends EA_Controller
      */
     public function install(): void
     {
+        // Validate all arguments before fresh migrations can change the database.
+        $fixture = $this->installFixtureArgument($GLOBALS['argv'] ?? []);
         $this->instance->migrate('fresh');
 
-        $password = $this->instance->seed();
+        $password = $this->instance->seed($fixture === 'fixture' ? 'administrator' : null);
 
         response(
             PHP_EOL . '⇾ Installation completed, login with "administrator" / "' . $password . '".' . PHP_EOL . PHP_EOL,
         );
+    }
+
+    /**
+     * Return the optional deterministic fixture selector for install.
+     *
+     * @param array<int, mixed> $arguments CLI argv values.
+     */
+    private function installFixtureArgument(array $arguments): ?string
+    {
+        $fixture = $arguments[3] ?? null;
+
+        if (($fixture !== null && $fixture !== 'fixture') || array_key_exists(4, $arguments)) {
+            throw new InvalidArgumentException('Console install accepts only the optional fixture argument.');
+        }
+
+        return $fixture;
     }
 
     /**
@@ -97,7 +115,9 @@ class Console extends EA_Controller
      */
     public function seed(): void
     {
-        $this->instance->seed();
+        $password = $this->instance->seed();
+
+        response(PHP_EOL . '⇾ Seed completed, login with "administrator" / "' . $password . '".' . PHP_EOL . PHP_EOL);
     }
 
     /**

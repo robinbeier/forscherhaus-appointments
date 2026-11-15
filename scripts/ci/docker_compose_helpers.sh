@@ -335,7 +335,7 @@ ci_docker_install_seed_instance() {
 
     local attempt
     for ((attempt = 1; attempt <= max_attempts; attempt++)); do
-        if ci_docker_compose "$@"; then
+        if ci_docker_compose "$@" fixture; then
             return 0
         fi
         echo "[$log_prefix] console install failed on attempt ${attempt}; retrying in 3s." >&2

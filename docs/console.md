@@ -52,15 +52,23 @@ This command will roll back the latest migration step.
 php index.php console seed
 ```
 
-This command will add a test admin, provider, customer and service in the app, so that you can already run some tests.  
+This command will add an administrator, provider, customer and service in the app, so that you can already run some tests. The generated administrator password is printed once for the operator.
 
 ##### Install
 
-```
+```bash
 php index.php console install
 ```
 
-This command prepares the local or CI test instance, including known fixture credentials.
+For disposable local or CI fixtures that intentionally use the documented
+test credentials, pass the explicit `fixture` argument. Normal installations
+generate a unique administrator password and print it once for the operator.
+
+```bash
+php index.php console install fixture
+```
+
+This command prepares a local or CI test instance. Use the explicit `fixture` argument above when known fixture credentials are required.
 The public browser installer is not supported. Do not expose a seeded test instance publicly.
 
 You can run this after your are done configuring your app from the root `config.php` file. 
