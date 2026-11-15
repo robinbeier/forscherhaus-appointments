@@ -786,6 +786,110 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
     }
 
+    #[Group('root-deployment')]
+    public function testZeroSurpriseReplayRequiresProtectedRendererTokenAndExportsOnlyToChild(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 3) . '/deploy_ea.sh');
+        $start = strpos($source, 'run_zero_surprise_predeploy_replay() {');
+        $end = strpos($source, "\nvalidate_zero_surprise_report()", $start === false ? 0 : $start);
+
+        self::assertNotFalse($start);
+        self::assertNotFalse($end);
+        $function = substr($source, $start, $end - $start);
+        self::assertIsString($function);
+        $readerStart = strpos($source, 'read_pdf_renderer_token() {');
+        $readerEnd = strpos(
+            $source,
+            "\nrun_zero_surprise_predeploy_replay()",
+            $readerStart === false ? 0 : $readerStart,
+        );
+        self::assertNotFalse($readerStart);
+        self::assertNotFalse($readerEnd);
+        $reader = substr($source, $readerStart, $readerEnd - $readerStart);
+        self::assertIsString($reader);
+        self::assertStringContainsString("PDF_RENDERER_TOKEN_FILE='/etc/fh/pdf-renderer-token.env'", $source);
+        self::assertStringContainsString('! -L "$PDF_RENDERER_TOKEN_FILE"', $reader);
+        self::assertStringContainsString('0:0:600:1', $reader);
+        self::assertStringContainsString('length(line) != 74', $reader);
+        self::assertStringContainsString('export PDF_TOKEN="$pdf_renderer_token"', $function);
+        self::assertStringNotContainsString('echo "$pdf_renderer_token"', $function);
+        self::assertStringNotContainsString('printf "%s" "$pdf_renderer_token"', $function);
+    }
+
+    #[Group('root-deployment')]
+    public function testZeroSurpriseReplayDoesNotReadRendererTokenDuringDryRun(): void
+    {
+        $result = $this->runShell(
+            <<<'BASH'
+            set -eu
+            source ./deploy_ea.sh
+            REQUIRE_ZERO_SURPRISE=1
+            DRYRUN=1
+            STAGE_ROOT=/does/not/exist
+            ZERO_SURPRISE_DUMP_FILE=/does/not/exist.dump
+            ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE=/does/not/exist.ini
+            PDF_RENDERER_TOKEN_FILE=/does/not/exist.token
+            run_zero_surprise_predeploy_replay
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+        self::assertStringNotContainsString('PDF_TOKEN=', $result['stdout']);
+    }
+
+    #[Group('root-deployment')]
+    public function testRendererTokenReaderAcceptsOnlyProtectedSingleLineTokenFile(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+            self::markTestSkipped('root-owned token fixture requires root');
+        }
+
+        $result = $this->runShell(
+            <<<'BASH'
+            set -eu
+            fixture="$(mktemp -d)"
+            trap 'rm -rf "$fixture"' EXIT
+            mkdir -p "$fixture/parent"
+            chmod 700 "$fixture/parent"
+            token='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            printf 'PDF_TOKEN=%s\n' "$token" > "$fixture/parent/token"
+            chmod 600 "$fixture/parent/token"
+            chown root:root "$fixture/parent/token" "$fixture/parent"
+            source ./deploy_ea.sh
+            PDF_RENDERER_TOKEN_FILE="$fixture/parent/token"
+            [[ "$(read_pdf_renderer_token)" == "$token" ]]
+
+            printf 'PDF_TOKEN=%s\nsecond-line\n' "$token" > "$fixture/parent/token"
+            if read_pdf_renderer_token; then exit 1; fi
+
+            printf 'PDF_TOKEN=%s\n' "$token" > "$fixture/parent/token"
+            chmod 640 "$fixture/parent/token"
+            if read_pdf_renderer_token; then exit 1; fi
+            chmod 600 "$fixture/parent/token"
+
+            rm -f "$fixture/parent/token"
+            ln -s "$fixture/parent/target" "$fixture/parent/token"
+            printf 'PDF_TOKEN=%s\n' "$token" > "$fixture/parent/target"
+            chmod 600 "$fixture/parent/target"
+            chown root:root "$fixture/parent/target"
+            if read_pdf_renderer_token; then exit 1; fi
+            rm -f "$fixture/parent/token"
+
+            chmod 777 "$fixture/parent"
+            printf 'PDF_TOKEN=%s\n' "$token" > "$fixture/parent/token"
+            chmod 600 "$fixture/parent/token"
+            chown root:root "$fixture/parent/token"
+            if read_pdf_renderer_token; then exit 1; fi
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+        self::assertSame('', trim($result['stdout']));
+        self::assertStringNotContainsString('aaaaaaaaaaaaaaaa', $result['stderr']);
+    }
+
     public function testZeroSurpriseStageRuntimeRejectsSymlinkedStorageChildWithoutTouchingTarget(): void
     {
         $result = $this->runShell(

@@ -213,9 +213,14 @@ mode or state-directory option is needed. Remove the former
 commands when updating deployment tools.
 
 The hardened renderer requires the same root-controlled `PDF_TOKEN` in its
-container and in the PHP runtime before it is enabled. Coordinate that
-configuration and any renderer image change separately from an application
-deploy. The ordinary `/healthz` check proves liveness only; after the change,
+container and in the PHP runtime before it is enabled. Store the value only in
+the root-owned, mode-`0600` regular file
+`/etc/fh/pdf-renderer-token.env` as one `PDF_TOKEN=` line containing 64
+lowercase hexadecimal characters. The bound deployment replay validates that
+file and passes the value only to its child Compose process; it never copies
+the token into the release or its evidence. Coordinate that configuration and
+any renderer image change separately from an application deploy. The ordinary
+`/healthz` check proves liveness only; after the change,
 run the authenticated [dashboard PDF release gate](release-gate-dashboard.md)
 against the active release and require successful PDF exports. If it fails,
 roll back the renderer change before treating the deployment as healthy.
