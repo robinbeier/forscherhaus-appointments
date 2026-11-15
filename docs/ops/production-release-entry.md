@@ -204,6 +204,13 @@ application deploy.
    helper update has been completed; do not relax the hash check. The
    release-pair and backup helpers remain prerequisites.
 
+   The host deploy helper now requires the independently derived archive
+   SHA-256 (`--archive-sha256`) on every non-dry invocation. It verifies that
+   digest before extracting any archive bytes and extracts only the verified
+   snapshot, so the staged validator cannot be selected from an unauthenticated
+   archive. The bound-release entry supplies this argument from the exact
+   published archive it has already verified; direct callers must do the same.
+
    The source-level bound-release entry still requires the
    already published archive/provenance pair, a fresh verified backup handoff,
    and the exact currently active release. Its inputs are the reviewed commit,

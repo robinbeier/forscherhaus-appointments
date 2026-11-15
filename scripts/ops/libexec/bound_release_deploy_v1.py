@@ -474,6 +474,7 @@ def run(args):
         reserve_recovery_guard(args.release, args.expected_active_release, args.run_id,
                                intent_path, result_path)
         command = [DEPLOY, '--rel', args.release,
+                   '--archive-sha256', args.archive_sha,
                    '--healthz-token-file', CONFIGS[1][0],
                    '--zero-surprise-dump-file', handoff['dump_path'],
                    '--zero-surprise-predeploy-credentials-file', CONFIGS[2][0],
