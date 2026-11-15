@@ -79,10 +79,12 @@ class EA_Controller
 }
 class ProbeDb
 {
+    public string $database = 'synthetic';
+
     public function trans_active(): bool
     {
         $GLOBALS['events'][] = 'trans_active';
-        return false;
+        return $GLOBALS['scenario'] === 'nested-transaction';
     }
 
     public function trans_begin(): bool
@@ -98,7 +100,7 @@ class ProbeDb
     public function trans_commit(): bool
     {
         $GLOBALS['events'][] = 'trans_commit';
-        return true;
+        return $GLOBALS['scenario'] !== 'commit-fails';
     }
     public function trans_rollback(): bool
     {
@@ -111,6 +113,14 @@ class ProbeDb
     }
     public function query(string $sql, array $params): ProbeDbResult
     {
+        if (str_contains($sql, 'GET_LOCK')) {
+            $GLOBALS['events'][] = 'get_lock';
+            return new ProbeDbResult([['acquired' => 1]]);
+        }
+        if (str_contains($sql, 'RELEASE_LOCK')) {
+            $GLOBALS['events'][] = 'release_lock';
+            return new ProbeDbResult([['released' => 1]]);
+        }
         if (str_contains($sql, '`id_roles`')) {
             $GLOBALS['events'][] = 'lock_users:' . implode(',', $params);
             return new ProbeDbResult([['id_roles' => 3]]);
@@ -173,6 +183,11 @@ class ProbeDbResult
     public function row_array(): array
     {
         return is_array($this->rows) ? $this->rows[0] ?? [] : [];
+    }
+
+    public function row(): object
+    {
+        return (object) $this->row_array();
     }
 }
 class ProbeUsersModel

@@ -61,6 +61,7 @@ final class CustomerPostGuardTest extends TestCase
                     'only:' . json_encode(self::FIELDS, JSON_THROW_ON_ERROR),
                     'optional:[]',
                     'trans_active',
+                    'get_lock',
                     'trans_begin',
                     'lock_users:17',
                     'lock_roles:3',
@@ -70,6 +71,7 @@ final class CustomerPostGuardTest extends TestCase
                     'trans_status',
                     'trans_commit',
                     'json_response',
+                    'release_lock',
                 ]
                 : ($action === 'destroy'
                     ? [
@@ -132,6 +134,7 @@ final class CustomerPostGuardTest extends TestCase
                 'only:' . json_encode(self::FIELDS, JSON_THROW_ON_ERROR),
                 'optional:[]',
                 'trans_active',
+                'get_lock',
                 'trans_begin',
                 'lock_users:17',
                 'lock_roles:3',
@@ -141,6 +144,7 @@ final class CustomerPostGuardTest extends TestCase
                 'trans_status',
                 'trans_commit',
                 'json_response',
+                'release_lock',
             ]),
             $allowed['events'],
         );
@@ -184,6 +188,7 @@ final class CustomerPostGuardTest extends TestCase
                 'only:' . json_encode(self::FIELDS, JSON_THROW_ON_ERROR),
                 'optional:[]',
                 'trans_active',
+                'get_lock',
                 'trans_begin',
                 'lock_users:17',
                 'lock_roles:3',
@@ -210,6 +215,7 @@ final class CustomerPostGuardTest extends TestCase
                 'only:' . json_encode(self::FIELDS, JSON_THROW_ON_ERROR),
                 'optional:[]',
                 'trans_active',
+                'get_lock',
                 'trans_begin',
                 'lock_users:17',
                 'lock_roles:3',
@@ -221,6 +227,39 @@ final class CustomerPostGuardTest extends TestCase
         );
         self::assertSame(403, $result['status']);
         self::assertSame([], $result['saved']);
+    }
+
+    public function testStoreFailsClosedWhenTransactionAlreadyActiveBeforeIdentityLock(): void
+    {
+        $result = $this->probe('store', 'nested-transaction', 'POST');
+        self::assertSame(
+            [
+                'session:user_id',
+                'auth:add:customers:17',
+                'users:value:17:id_roles',
+                'roles:value:3:slug',
+                'dto:customer',
+                'only:' . json_encode(self::FIELDS, JSON_THROW_ON_ERROR),
+                'optional:[]',
+                'trans_active',
+                'json_exception',
+            ],
+            $result['events'],
+        );
+        self::assertSame(500, $result['status']);
+        self::assertSame([], $result['saved']);
+        self::assertStringContainsString('cannot join an existing transaction', $result['body']);
+    }
+
+    public function testStoreReleasesIdentityLockAfterRollback(): void
+    {
+        $result = $this->probe('store', 'commit-fails', 'POST');
+        $rollback = array_search('trans_rollback', $result['events'], true);
+        $release = array_search('release_lock', $result['events'], true);
+        self::assertIsInt($rollback);
+        self::assertIsInt($release);
+        self::assertLessThan($release, $rollback);
+        self::assertSame(500, $result['status']);
     }
 
     public function testDeniedCustomerAccessStopsBeforeSaveFindOrDelete(): void

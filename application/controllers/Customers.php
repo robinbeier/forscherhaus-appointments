@@ -292,6 +292,7 @@ class Customers extends EA_Controller
     public function store(): void
     {
         $owns_transaction = false;
+        $creation_identity_lock = null;
 
         try {
             $user_id = (int) session('user_id');
@@ -325,10 +326,15 @@ class Customers extends EA_Controller
 
             $this->customers_model->optional($customer, $this->optional_customer_fields);
 
-            $owns_transaction = !$this->db->trans_active();
-            if ($owns_transaction && !$this->db->trans_begin()) {
+            if ($this->db->trans_active()) {
+                throw new RuntimeException('Customer creation cannot join an existing transaction.');
+            }
+
+            $creation_identity_lock = $this->acquireCustomerCreationIdentityLock($customer['email'] ?? null);
+            if (!$this->db->trans_begin()) {
                 throw new RuntimeException('Could not start customer create transaction.');
             }
+            $owns_transaction = true;
 
             // Bind the authorization decision to the insert transaction. The
             // role row must stay locked through the write so a concurrent
@@ -390,7 +396,7 @@ class Customers extends EA_Controller
                 return;
             }
 
-            $customer_id = $this->customers_model->insert_new($customer);
+            $customer_id = $this->customers_model->insert_new($customer, $creation_identity_lock);
 
             $customer = $this->customers_model->find($customer_id);
 
@@ -411,6 +417,38 @@ class Customers extends EA_Controller
                 $this->db->trans_rollback();
             }
             json_exception($e);
+        } finally {
+            $this->releaseCustomerCreationIdentityLock($creation_identity_lock);
+        }
+    }
+
+    private function acquireCustomerCreationIdentityLock(?string $email): ?string
+    {
+        require_once APPPATH . 'core/Customer_creation_identity_lock.php';
+
+        $lock_name = Customer_creation_identity_lock::name($email, (string) ($this->db->database ?? ''));
+        if ($lock_name === null) {
+            return null;
+        }
+
+        $lock = $this->db->query('SELECT GET_LOCK(?, 10) AS acquired', [$lock_name]);
+        if ($lock === false || (int) $lock->row()->acquired !== 1) {
+            throw new RuntimeException('Could not reserve the customer email for creation.');
+        }
+
+        return $lock_name;
+    }
+
+    private function releaseCustomerCreationIdentityLock(?string $lock_name): void
+    {
+        if ($lock_name === null) {
+            return;
+        }
+
+        try {
+            $this->db->query('SELECT RELEASE_LOCK(?)', [$lock_name]);
+        } catch (Throwable) {
+            // The non-persistent connection closing also releases the lock.
         }
     }
 
