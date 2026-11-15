@@ -106,7 +106,12 @@ save-disable, lock, disable-keys, zero-or-more same-table inserts, enable-keys,
 unlock, commit and restore autocommit sequence),
 table drop/create, table locks, key
 disable/enable, and `INSERT ... VALUES`. Database-selection and database-DDL
-statements are not part of this subset.
+statements are not part of this subset. An `INSERT` may optionally include an
+explicit, backtick-quoted column list, for example
+`INSERT INTO \`ea_user_settings\` (\`id_users\`, \`username_unique\`) VALUES
+(...)`; the target table must remain the same table bound by `LOCK TABLES` and
+`ALTER ... DISABLE/ENABLE KEYS`. `SELECT`, cross-table targets, dynamic SQL,
+and arbitrary additional statement classes remain rejected.
 Triggers, routines, events, views, dynamic SQL, alternate engines, partitions,
 external directories, client commands and every other statement class reject.
 The exact accepted `CREATE TABLE` count is capped at 10,000 and supplies the
