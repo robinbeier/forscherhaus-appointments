@@ -37,7 +37,7 @@ async function waitForRenderer(child, rendererPort) {
     throw new Error('renderer did not become ready');
 }
 
-async function startRenderer({token = 'synthetic-renderer-token'} = {}) {
+async function startRenderer({token = 'synthetic-renderer-token', maxConcurrentRenders, bodyIngressTimeoutMs} = {}) {
     const port = await reservePort();
     const child = spawn(process.execPath, ['server.js'], {
         cwd: new URL('.', import.meta.url),
@@ -45,6 +45,8 @@ async function startRenderer({token = 'synthetic-renderer-token'} = {}) {
             ...process.env,
             PORT: String(port),
             PDF_TOKEN: token,
+            ...(maxConcurrentRenders === undefined ? {} : {PDF_MAX_CONCURRENT_RENDERS: String(maxConcurrentRenders)}),
+            ...(bodyIngressTimeoutMs === undefined ? {} : {PDF_BODY_INGRESS_TIMEOUT_MS: String(bodyIngressTimeoutMs)}),
         },
         stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -178,6 +180,97 @@ test('rejects PDF requests without a configured token or with an invalid token',
     }
 });
 
+test('releases the render slot when JSON parsing fails or the body is too large', {timeout: 30000}, async () => {
+    const renderer = await startRenderer({maxConcurrentRenders: 1});
+
+    try {
+        const malformed = await fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
+            method: 'POST',
+            headers: pdfHeaders,
+            body: '{',
+        });
+        assert.equal(malformed.status, 400, renderer.output());
+        assert.deepEqual(await malformed.json(), {error: 'invalid_json'});
+
+        const afterMalformed = await fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
+            method: 'POST',
+            headers: pdfHeaders,
+            body: '{',
+        });
+        assert.equal(afterMalformed.status, 400, renderer.output());
+        assert.deepEqual(await afterMalformed.json(), {error: 'invalid_json'});
+
+        const oversized = await fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
+            method: 'POST',
+            headers: pdfHeaders,
+            body: JSON.stringify({html: 'x'.repeat(20 * 1024 * 1024)}),
+        });
+        assert.equal(oversized.status, 400, renderer.output());
+        assert.deepEqual(await oversized.json(), {error: 'payload_too_large'});
+
+        const afterOversized = await fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
+            method: 'POST',
+            headers: pdfHeaders,
+            body: '{',
+        });
+        assert.equal(afterOversized.status, 400, renderer.output());
+        assert.deepEqual(await afterOversized.json(), {error: 'invalid_json'});
+
+        const invalidBody = await fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
+            method: 'POST',
+            headers: pdfHeaders,
+            body: JSON.stringify({}),
+        });
+        assert.equal(invalidBody.status, 400, renderer.output());
+        assert.deepEqual(await invalidBody.json(), {error: 'Provide html'});
+
+        const afterInvalidBody = await fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
+            method: 'POST',
+            headers: pdfHeaders,
+            body: JSON.stringify({}),
+        });
+        assert.equal(afterInvalidBody.status, 400, renderer.output());
+        assert.deepEqual(await afterInvalidBody.json(), {error: 'Provide html'});
+    } finally {
+        await stopRenderer(renderer.child);
+    }
+});
+
+test('closes a slow body and releases its admitted render slot', {timeout: 30000}, async () => {
+    const renderer = await startRenderer({maxConcurrentRenders: 1, bodyIngressTimeoutMs: 250});
+
+    try {
+        await new Promise((resolve, reject) => {
+            const request = http.request(`http://127.0.0.1:${renderer.port}/pdf`, {
+                method: 'POST',
+                headers: {
+                    ...pdfHeaders,
+                    'content-length': '100',
+                },
+            });
+            const timer = setTimeout(() => {
+                request.destroy();
+                reject(new Error('slow body request was not closed'));
+            }, 5000);
+            request.on('error', () => {
+                clearTimeout(timer);
+                resolve();
+            });
+            request.write('{');
+        });
+
+        const afterTimeout = await fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
+            method: 'POST',
+            headers: pdfHeaders,
+            body: JSON.stringify({}),
+        });
+        assert.equal(afterTimeout.status, 400, renderer.output());
+        assert.deepEqual(await afterTimeout.json(), {error: 'Provide html'});
+    } finally {
+        await stopRenderer(renderer.child);
+    }
+});
+
 test('rejects URL-only PDF requests', {timeout: 30000}, async () => {
     const renderer = await startRenderer();
 
@@ -306,6 +399,68 @@ test('shares one cold browser launch across four concurrent renders', {timeout: 
         const retryPdf = Buffer.from(await retry.arrayBuffer());
         assert.equal(retry.status, 200, renderer.output());
         assert.equal(retryPdf.subarray(0, 5).toString(), '%PDF-');
+    } finally {
+        await stopRenderer(renderer.child);
+    }
+});
+
+test('rejects excess concurrent renders without queueing them', {timeout: 30000}, async () => {
+    const renderer = await startRenderer({maxConcurrentRenders: 2});
+    const heldPayload = JSON.stringify({
+        html: '<html><body><script>window.chartsReady = false;</script><h1>Held render</h1></body></html>',
+        waitFor: 'chartsReady',
+    });
+
+    try {
+        const heldRequests = [1, 2].map(() =>
+            fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
+                method: 'POST',
+                headers: pdfHeaders,
+                body: heldPayload,
+                signal: AbortSignal.timeout(20000),
+            }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        const rejected = await fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
+            method: 'POST',
+            headers: pdfHeaders,
+            body: JSON.stringify({html: '<html><body><h1>Busy</h1></body></html>'}),
+        });
+        assert.equal(rejected.status, 503, renderer.output());
+        assert.equal(rejected.headers.get('retry-after'), '1');
+        assert.deepEqual(await rejected.json(), {error: 'renderer_busy'});
+
+        const responses = await Promise.all(heldRequests);
+        for (const response of responses) {
+            assert.equal(response.status, 200, renderer.output());
+            assert.equal(
+                Buffer.from(await response.arrayBuffer())
+                    .subarray(0, 5)
+                    .toString(),
+                '%PDF-',
+            );
+        }
+
+        let retry;
+        const retryDeadline = Date.now() + 5000;
+        do {
+            retry = await fetch(`http://127.0.0.1:${renderer.port}/pdf`, {
+                method: 'POST',
+                headers: pdfHeaders,
+                body: JSON.stringify({html: '<html><body><h1>Available again</h1></body></html>'}),
+            });
+            if (retry.status === 503) {
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+        } while (retry.status === 503 && Date.now() < retryDeadline);
+        assert.equal(retry.status, 200, renderer.output());
+        assert.equal(
+            Buffer.from(await retry.arrayBuffer())
+                .subarray(0, 5)
+                .toString(),
+            '%PDF-',
+        );
     } finally {
         await stopRenderer(renderer.child);
     }

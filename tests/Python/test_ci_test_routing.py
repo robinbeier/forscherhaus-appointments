@@ -227,6 +227,52 @@ class TestRoutingGuardTest(unittest.TestCase):
         self.assertFalse(module.has_route(javascript, workflow, set(), []))
         self.assertTrue(module.has_route(javascript, workflow + "      - run: node --test pdf-renderer/new.test.js\n", set(), []))
 
+    def test_renderer_package_script_is_a_narrow_reviewed_route(self):
+        path = "pdf-renderer/concurrency.test.js"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "pdf-renderer/package.json"
+            package.parent.mkdir(parents=True)
+            package.write_text(
+                '{"scripts":{"test":"node --test server.test.js concurrency.test.js"}}\n',
+                encoding="utf-8",
+            )
+            workflow = (
+                "  pdf-renderer-tests:\n"
+                "    steps:\n"
+                "      - run: docker compose exec -T pdf-renderer npm test\n"
+            )
+            self.assertTrue(module.has_route(path, workflow, set(), [], root))
+
+            package.write_text(
+                '{"scripts":{"test":"node --test server.test.js concurrency.test.js.extra"}}\n',
+                encoding="utf-8",
+            )
+            self.assertFalse(module.has_route(path, workflow, set(), [], root))
+
+            package.write_text(
+                '{"scripts":{"test":"echo concurrency.test.js"}}\n',
+                encoding="utf-8",
+            )
+            self.assertFalse(module.has_route(path, workflow, set(), [], root))
+
+            package.write_text(
+                '{"scripts":{"test":"node --test concurrency.test.js other.test.js; echo x"}}\n',
+                encoding="utf-8",
+            )
+            self.assertFalse(module.has_route(path, workflow, set(), [], root))
+
+            package.write_text(
+                '{"scripts":{"test":"node --test server.test.js concurrency.test.js"}}\n',
+                encoding="utf-8",
+            )
+            missing_command = workflow.replace("npm test", "npm run lint")
+            self.assertFalse(module.has_route(path, missing_command, set(), [], root))
+
+            self.assertFalse(
+                module.has_route("pdf-renderer/other.test.js", workflow, set(), [], root)
+            )
+
     def test_shell_comment_filter_preserves_quoted_hashes(self):
         self.assertEqual(
             "node --test 'fixture#one.test.js' ",

@@ -36,6 +36,12 @@ class Dashboard_export extends EA_Controller
 
     protected const PROVIDER_PREPARATION_PDF_APPOINTMENTS_PER_PAGE = 4;
 
+    /** Maximum number of teacher PDFs retained by one ZIP request. */
+    protected const TEACHER_ZIP_MAX_MEMBERS = 200;
+
+    /** Maximum combined PDF bytes retained by one ZIP request. */
+    protected const TEACHER_ZIP_MAX_PDF_BYTES = 67108864;
+
     protected Dashboard_metrics $dashboardMetrics;
 
     protected Pdf_renderer $pdfRenderer;
@@ -1598,11 +1604,15 @@ class Dashboard_export extends EA_Controller
     ): void {
         $this->zipLibrary->clear_data();
 
+        $this->assertTeacherZipBudget(count($teacher_reports), 0);
+
         if (empty($teacher_reports)) {
             $empty_pdf = $this->pdfRenderer->render_view(
                 'exports/dashboard_teacher_pdf',
                 array_merge($base_view_data, ['teachers' => [], 'teacher_pages' => []]),
             );
+
+            $this->assertTeacherZipBudget(1, strlen($empty_pdf));
 
             $this->zipLibrary->add_data($this->buildTeacherEmptyPdfFilename($start, $end), $empty_pdf);
             $this->streamZipDownload($this->buildTeacherZipFilename($start, $end));
@@ -1610,6 +1620,7 @@ class Dashboard_export extends EA_Controller
             return;
         }
 
+        $totalPdfBytes = 0;
         foreach ($teacher_reports as $teacher_report) {
             $teacher_data = [$teacher_report];
             $pdf_binary = $this->pdfRenderer->render_view(
@@ -1620,11 +1631,32 @@ class Dashboard_export extends EA_Controller
                 ]),
             );
 
+            $totalPdfBytes += strlen($pdf_binary);
+            $this->assertTeacherZipBudget(0, $totalPdfBytes);
+
             $member_filename = $this->buildTeacherPdfMemberFilename($teacher_report, $start, $end);
             $this->zipLibrary->add_data($member_filename, $pdf_binary);
         }
 
         $this->streamZipDownload($this->buildTeacherZipFilename($start, $end));
+    }
+
+    /**
+     * Reject oversized teacher ZIP requests before adding another member.
+     *
+     * @throws RuntimeException
+     */
+    protected function assertTeacherZipBudget(int $memberCount, int $pdfBytes): void
+    {
+        if ($memberCount > self::TEACHER_ZIP_MAX_MEMBERS) {
+            throw new RuntimeException(
+                'Teacher ZIP export exceeds the maximum of ' . self::TEACHER_ZIP_MAX_MEMBERS . ' reports.',
+            );
+        }
+
+        if ($pdfBytes > self::TEACHER_ZIP_MAX_PDF_BYTES) {
+            throw new RuntimeException('Teacher ZIP export exceeds the maximum PDF memory budget.');
+        }
     }
 
     /**

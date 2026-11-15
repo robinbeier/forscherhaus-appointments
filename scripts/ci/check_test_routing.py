@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Flag new test files without a CI route; pin three previously missed routes."""
+"""Flag new test files without a CI route; pin reviewed indirect routes."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 from xml.etree import ElementTree
@@ -41,6 +43,18 @@ REVIEWED_INDIRECT_PYTHON_ROUTES = {
     "tests/Unit/Scripts/manual_archive_cleanup_v1_test.py": ROOT_DEPLOYMENT_SCRIPT,
     "tests/Unit/Scripts/manual_release_cleanup_v1_test.py": ROOT_DEPLOYMENT_SCRIPT,
     "tests/Unit/Scripts/zero_surprise_canary_fixture_lock_test.py": ROOT_DEPLOYMENT_SCRIPT,
+}
+REVIEWED_INDIRECT_JS_ROUTES = {
+    # The renderer job invokes the package test script rather than naming each
+    # Node test at the workflow call site. Keep this route narrowly pinned to
+    # the exact package, job command, and script token.
+    "pdf-renderer/concurrency.test.js": {
+        "job": "pdf-renderer-tests",
+        "command": "docker compose exec -T pdf-renderer npm test",
+        "package": "pdf-renderer/package.json",
+        "script": "test",
+        "token": "concurrency.test.js",
+    },
 }
 
 
@@ -100,6 +114,23 @@ def contains_test_argument(commands: str, name: str, *, module: bool = False) ->
     return re.search(rf"(?<![{word_characters}]){re.escape(name)}(?![{word_characters}])", commands) is not None
 
 
+def contains_exact_command(commands: str, expected: str) -> bool:
+    wanted = " ".join(expected.split())
+    return any(" ".join(line.split()) == wanted for line in commands.splitlines())
+
+
+def contains_node_test_file(script: str, filename: str) -> bool:
+    try:
+        tokens = shlex.split(script, posix=True)
+    except ValueError:
+        return False
+    if len(tokens) < 3 or tokens[:2] != ["node", "--test"]:
+        return False
+    if any(re.fullmatch(r"[A-Za-z0-9_.-]+\.test\.js", token) is None for token in tokens[2:]):
+        return False
+    return filename in tokens[2:]
+
+
 def added_test_files(base: str, root: Path = ROOT) -> list[str]:
     result = subprocess.run(
         ["git", "diff", "--no-renames", "--name-only", "--diff-filter=A", f"{base}...HEAD", "--", "tests", "pdf-renderer"],
@@ -155,6 +186,20 @@ def has_route(path: str, workflow: str, files: set[str], directories: list[str],
         return (
             contains_test_argument(commands, route_script)
             and contains_test_argument(script_commands, module_name, module=True)
+        )
+    route = REVIEWED_INDIRECT_JS_ROUTES.get(path)
+    if route:
+        package_path = root / route["package"]
+        try:
+            manifest = json.loads(package_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        script = manifest.get("scripts", {}).get(route["script"])
+        job_commands = run_commands(job_body(workflow, route["job"]))
+        return (
+            isinstance(script, str)
+            and contains_exact_command(job_commands, route["command"])
+            and contains_node_test_file(script, route["token"])
         )
     return contains_test_argument(commands, path) or (
         path.endswith(".py") and contains_test_argument(

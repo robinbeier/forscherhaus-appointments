@@ -24,7 +24,7 @@ RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci --omit=dev \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --chown=node:node server.js server.test.js ./
+COPY --chown=node:node server.js server.test.js concurrency.js concurrency.test.js ./
 
 USER node
 
