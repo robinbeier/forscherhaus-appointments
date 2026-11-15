@@ -182,6 +182,20 @@ final class DashboardExportHttpTest extends TestCase
         }
     }
 
+    public function testAdminExportValidationErrorsRemainHelpful(): void
+    {
+        $admin = $this->login($this->fixture->run . '_actor', $this->fixture->password);
+        foreach ($this->exportRoutes() as $route) {
+            $response = $admin->get($route, [
+                'start_date' => 'invalid-date',
+                'end_date' => $this->periodEnd,
+            ]);
+            self::assertSame(400, $response->statusCode, $route);
+            self::assertStringContainsString('choose one weekday', strtolower($response->body));
+            self::assertStringNotContainsString('dashboard export could not be generated', strtolower($response->body));
+        }
+    }
+
     public function testDashboardExportAliasesRejectAnonymousProviderAndNonGetRequestsBeforeRendering(): void
     {
         $fixture = $this->fixture;

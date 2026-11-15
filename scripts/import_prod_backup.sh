@@ -7,7 +7,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
+SSH_OPTIONS=()
 
 PROD_SSH_TARGET="${PROD_SSH_TARGET:-root@booking-server}"
 REMOTE_BACKUP_DIR=''
@@ -15,6 +15,8 @@ REMOTE_BACKUP_ROOT='/root/backups/easyappointments'
 LOCAL_DOWNLOAD_ROOT="${LOCAL_DOWNLOAD_ROOT:-/tmp}"
 LOCAL_DB_NAME="${LOCAL_DB_NAME:-easyappointments}"
 START_FULL_STACK="${START_FULL_STACK:-1}"
+SSH_KNOWN_HOSTS_FILE="${PROD_SSH_KNOWN_HOSTS_FILE:-}"
+SSH_KNOWN_HOSTS_IDENTITY=''
 LOCAL_PHP_IMAGE_ID=''
 LOCAL_PDF_IMAGE_ID=''
 
@@ -26,6 +28,8 @@ Usage:
 Options:
   --prod-ssh-target TARGET         SSH target for production access.
                                    Default: root@booking-server (Tailscale)
+  --ssh-known-hosts-file PATH      Dedicated trusted host-key file. Required;
+                                   the user's implicit SSH known_hosts is ignored.
   --remote-backup-dir PATH         Reuse an existing remote backup directory instead of creating a new one.
   --local-download-root PATH       Local directory for the downloaded dump and metadata.
                                    Default: /tmp
@@ -113,6 +117,48 @@ ensure_ssh_target() {
     [[ "$1" =~ ^root@[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "Production SSH target must be root@hostname or root@IPv4-style host."
 }
 
+known_hosts_identity() {
+    python3 - "$1" <<'PY'
+import hashlib
+import os
+import stat
+import sys
+
+path = sys.argv[1]
+if not os.path.isabs(path) or os.path.realpath(path) != path:
+    raise SystemExit(2)
+current = os.path.dirname(path)
+while True:
+    item = os.lstat(current)
+    if not stat.S_ISDIR(item.st_mode) or item.st_uid not in (0, os.geteuid()) or item.st_mode & 0o022:
+        raise SystemExit(3)
+    parent = os.path.dirname(current)
+    if parent == current:
+        break
+    current = parent
+item = os.lstat(path)
+if (not stat.S_ISREG(item.st_mode) or item.st_nlink != 1 or
+        item.st_uid not in (0, os.geteuid()) or item.st_mode & 0o022 or item.st_size <= 0):
+    raise SystemExit(4)
+digest = hashlib.sha256()
+with open(path, 'rb') as stream:
+    for block in iter(lambda: stream.read(1024 * 1024), b''):
+        digest.update(block)
+print(':'.join(str(value) for value in (
+    item.st_dev, item.st_ino, item.st_size, stat.S_IMODE(item.st_mode),
+    item.st_uid, item.st_gid, item.st_nlink, digest.hexdigest(),
+)))
+PY
+}
+
+assert_known_hosts_stable() {
+    local current_identity
+    current_identity="$(known_hosts_identity "${SSH_KNOWN_HOSTS_FILE}")" ||
+        die "Dedicated SSH known-hosts file became unsafe or unavailable."
+    [[ "$current_identity" == "$SSH_KNOWN_HOSTS_IDENTITY" ]] ||
+        die "Dedicated SSH known-hosts file changed during the import."
+}
+
 ensure_remote_backup_dir() {
     local backup_stamp suffix
     [[ "$1" == "${REMOTE_BACKUP_ROOT}"/* ]] || die "Remote backup directory must be below the canonical backup root."
@@ -125,6 +171,7 @@ ensure_remote_backup_dir() {
 validate_remote_backup_layout() {
     local remote_dir_q
     printf -v remote_dir_q '%q' "$REMOTE_BACKUP_DIR"
+    assert_known_hosts_stable
     ssh "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}" \
         "test ! -L /root && test ! -L /root/backups && test ! -L /root/backups/easyappointments && test -f /root/backups/easyappointments/last_backup_set.json && test ! -L /root/backups/easyappointments/last_backup_set.json && test -d ${remote_dir_q} && test ! -L ${remote_dir_q} && test -d ${remote_dir_q}/db && test ! -L ${remote_dir_q}/db && test -d ${remote_dir_q}/meta && test ! -L ${remote_dir_q}/meta && test -f ${remote_dir_q}/db/easyappointments.sql.gz && test ! -L ${remote_dir_q}/db/easyappointments.sql.gz && test -f ${remote_dir_q}/meta/backup.env && test ! -L ${remote_dir_q}/meta/backup.env" >/dev/null
 }
@@ -140,6 +187,10 @@ parse_args() {
         case "$1" in
             --prod-ssh-target)
                 PROD_SSH_TARGET="$2"
+                shift 2
+                ;;
+            --ssh-known-hosts-file)
+                SSH_KNOWN_HOSTS_FILE="$2"
                 shift 2
                 ;;
             --remote-backup-dir)
@@ -170,6 +221,16 @@ parse_args() {
     [[ "${REMOTE_BACKUP_ROOT}" == '/root/backups/easyappointments' ]] || die "Remote backup root is fixed to the canonical production path."
     [[ -n "${REMOTE_BACKUP_DIR}" ]] || die "--remote-backup-dir is required; creating a production backup is disabled."
     ensure_ssh_target "${PROD_SSH_TARGET}"
+    [[ -n "${SSH_KNOWN_HOSTS_FILE}" ]] || die "--ssh-known-hosts-file is required; first-use host-key enrollment is disabled."
+    SSH_KNOWN_HOSTS_FILE="$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "${SSH_KNOWN_HOSTS_FILE}")" ||
+        die "Dedicated SSH known-hosts file path is invalid."
+    SSH_KNOWN_HOSTS_IDENTITY="$(known_hosts_identity "${SSH_KNOWN_HOSTS_FILE}")" ||
+        die "Dedicated SSH known-hosts file is missing, writable, or untrusted."
+    SSH_OPTIONS=(
+        -o StrictHostKeyChecking=yes
+        -o UserKnownHostsFile="${SSH_KNOWN_HOSTS_FILE}"
+        -o GlobalKnownHostsFile=/dev/null
+    )
 }
 
 create_or_select_remote_backup() {
@@ -193,8 +254,11 @@ download_remote_backup() {
     log "Downloading dump to ${LOCAL_IMPORT_DIR}"
     (
         umask 077
+        assert_known_hosts_stable
         scp "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}:${REMOTE_BACKUP_DIR}/db/easyappointments.sql.gz" "${LOCAL_DUMP_PATH}"
+        assert_known_hosts_stable
         scp "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}:${REMOTE_BACKUP_DIR}/meta/backup.env" "${LOCAL_META_PATH}"
+        assert_known_hosts_stable
         scp "${SSH_OPTIONS[@]}" "${PROD_SSH_TARGET}:${REMOTE_BACKUP_ROOT}/last_backup_set.json" "${LOCAL_HANDOFF_PATH}"
     )
     chmod 0600 "${LOCAL_DUMP_PATH}" "${LOCAL_META_PATH}" "${LOCAL_HANDOFF_PATH}"

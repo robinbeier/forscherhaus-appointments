@@ -22,6 +22,38 @@ require_once dirname(__DIR__, 3) . '/system/libraries/Zip.php';
 
 class DashboardExportControllerTest extends TestCase
 {
+    public function testUnexpectedDashboardExportFailuresUseGenericServerErrorMessages(): void
+    {
+        $source = file_get_contents(APPPATH . 'controllers/Dashboard_export.php');
+
+        self::assertIsString($source);
+        self::assertSame(
+            5,
+            substr_count(
+                $source,
+                "abort(500, 'The dashboard export could not be generated. Please try again later.');",
+            ),
+        );
+        self::assertSame(5, substr_count($source, 'abort(400, $exception->getMessage());'));
+        self::assertDoesNotMatchRegularExpression(
+            '/catch \(Throwable \$exception\)\s*\{\s*log_message\([^;]+\);\s*abort\(400, \$exception->getMessage\(\)\);/',
+            $source,
+        );
+
+        foreach (
+            [
+                'Failed to render principal dashboard export',
+                'Failed to render teacher dashboard export',
+                'Failed to render teacher dashboard ZIP export',
+                'Failed to render provider parent appointments export',
+                'Failed to render provider preparation export',
+            ]
+            as $logPrefix
+        ) {
+            self::assertStringContainsString($logPrefix . ": ' . \$exception->getMessage()", $source);
+        }
+    }
+
     public function testProviderPreparationExportKeepsProviderAuthenticationAndSessionScope(): void
     {
         $method = new \ReflectionMethod(Dashboard_export::class, 'provider_preparation_pdf');

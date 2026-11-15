@@ -239,7 +239,7 @@ final class ProviderPdfExportHttpTest extends TestCase
             as $route
         ) {
             $response = $provider->get($route, $range);
-            self::assertSame(400, $response->statusCode, $route);
+            self::assertSame(500, $response->statusCode, $route);
             self::assertStringNotContainsString('renderer-internal-secret-ROB-952', $response->body);
             self::assertStringContainsString('PDF export could not be generated', $response->body);
         }

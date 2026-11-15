@@ -95,10 +95,14 @@ class Dashboard_export extends EA_Controller
         try {
             $this->assertAdmin();
 
-            $request_dto = $this->dashboardRequestDtoFactory()->buildExportRequestFromGlobals(
-                $this->getConfiguredThreshold(),
-                $this->getThresholdValidationMessage(),
-            );
+            try {
+                $request_dto = $this->dashboardRequestDtoFactory()->buildExportRequestFromGlobals(
+                    $this->getConfiguredThreshold(),
+                    $this->getThresholdValidationMessage(),
+                );
+            } catch (InvalidArgumentException $exception) {
+                abort(400, $exception->getMessage());
+            }
             $period = $request_dto->period;
             $normalized_statuses = $request_dto->filters->statuses;
             $normalized_service_id = $request_dto->filters->serviceId;
@@ -137,7 +141,7 @@ class Dashboard_export extends EA_Controller
             );
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render principal dashboard export: ' . $exception->getMessage());
-            abort(400, $exception->getMessage());
+            abort(500, 'The dashboard export could not be generated. Please try again later.');
         }
     }
 
@@ -146,10 +150,14 @@ class Dashboard_export extends EA_Controller
         try {
             $this->assertAdmin();
 
-            $request_dto = $this->dashboardRequestDtoFactory()->buildExportRequestFromGlobals(
-                $this->getConfiguredThreshold(),
-                $this->getThresholdValidationMessage(),
-            );
+            try {
+                $request_dto = $this->dashboardRequestDtoFactory()->buildExportRequestFromGlobals(
+                    $this->getConfiguredThreshold(),
+                    $this->getThresholdValidationMessage(),
+                );
+            } catch (InvalidArgumentException $exception) {
+                abort(400, $exception->getMessage());
+            }
             $period = $request_dto->period;
             $normalized_statuses = $request_dto->filters->statuses;
             $normalized_service_id = $request_dto->filters->serviceId;
@@ -196,7 +204,7 @@ class Dashboard_export extends EA_Controller
             );
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render teacher dashboard export: ' . $exception->getMessage());
-            abort(400, $exception->getMessage());
+            abort(500, 'The dashboard export could not be generated. Please try again later.');
         }
     }
 
@@ -208,10 +216,14 @@ class Dashboard_export extends EA_Controller
         try {
             $this->assertAdmin();
 
-            $request_dto = $this->dashboardRequestDtoFactory()->buildExportRequestFromGlobals(
-                $this->getConfiguredThreshold(),
-                $this->getThresholdValidationMessage(),
-            );
+            try {
+                $request_dto = $this->dashboardRequestDtoFactory()->buildExportRequestFromGlobals(
+                    $this->getConfiguredThreshold(),
+                    $this->getThresholdValidationMessage(),
+                );
+            } catch (InvalidArgumentException $exception) {
+                abort(400, $exception->getMessage());
+            }
             $period = $request_dto->period;
             $normalized_statuses = $request_dto->filters->statuses;
             $normalized_service_id = $request_dto->filters->serviceId;
@@ -251,7 +263,7 @@ class Dashboard_export extends EA_Controller
             $this->streamTeacherZipDownload($teacherReports, $base_view_data, $period->start, $period->end);
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render teacher dashboard ZIP export: ' . $exception->getMessage());
-            abort(400, $exception->getMessage());
+            abort(500, 'The dashboard export could not be generated. Please try again later.');
         }
     }
 
@@ -263,7 +275,11 @@ class Dashboard_export extends EA_Controller
         try {
             $this->assertProvider();
 
-            $request_dto = $this->dashboardRequestDtoFactory()->buildProviderMetricsRequestFromGlobals();
+            try {
+                $request_dto = $this->dashboardRequestDtoFactory()->buildProviderMetricsRequestFromGlobals();
+            } catch (InvalidArgumentException $exception) {
+                abort(400, $exception->getMessage());
+            }
             $period = $request_dto->period;
             $provider_id = (int) session('user_id');
             $provider = $this->providersModel->find($provider_id);
@@ -292,11 +308,11 @@ class Dashboard_export extends EA_Controller
                 );
             } catch (Throwable $exception) {
                 log_message('error', 'Failed to render provider parent appointments PDF: ' . $exception->getMessage());
-                abort(400, 'The PDF export could not be generated. Please try again later.');
+                abort(500, 'The PDF export could not be generated. Please try again later.');
             }
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render provider parent appointments export: ' . $exception->getMessage());
-            abort(400, $exception->getMessage());
+            abort(500, 'The dashboard export could not be generated. Please try again later.');
         }
     }
 
@@ -308,7 +324,11 @@ class Dashboard_export extends EA_Controller
         try {
             $this->assertProvider();
 
-            $request_dto = $this->dashboardRequestDtoFactory()->buildProviderMetricsRequestFromGlobals();
+            try {
+                $request_dto = $this->dashboardRequestDtoFactory()->buildProviderMetricsRequestFromGlobals();
+            } catch (InvalidArgumentException $exception) {
+                abort(400, $exception->getMessage());
+            }
             $period = $request_dto->period;
             $provider_id = (int) session('user_id');
             $provider = $this->providersModel->find($provider_id);
@@ -335,11 +355,11 @@ class Dashboard_export extends EA_Controller
                 );
             } catch (Throwable $exception) {
                 log_message('error', 'Failed to render provider preparation PDF: ' . $exception->getMessage());
-                abort(400, 'The PDF export could not be generated. Please try again later.');
+                abort(500, 'The PDF export could not be generated. Please try again later.');
             }
         } catch (Throwable $exception) {
             log_message('error', 'Failed to render provider preparation export: ' . $exception->getMessage());
-            abort(400, $exception->getMessage());
+            abort(500, 'The dashboard export could not be generated. Please try again later.');
         }
     }
 

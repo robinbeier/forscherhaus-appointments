@@ -28,6 +28,10 @@
 |
 */
 
+$cspCollectorRequest =
+    class_exists('Csp_report_only') &&
+    strtolower((string) (load_class('URI', 'core')->rsegments[1] ?? '')) === 'csp_report';
+
 /*
 | -------------------------------------------------------------------
 |  Auto-load Packages
@@ -52,7 +56,7 @@ $autoload['packages'] = [];
 |	$autoload['libraries'] = array('database', 'session', 'xmlrpc');
 */
 
-$autoload['libraries'] = ['database', 'session'];
+$autoload['libraries'] = $cspCollectorRequest ? [] : ['database', 'session'];
 
 /*
 | -------------------------------------------------------------------

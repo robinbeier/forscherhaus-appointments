@@ -123,6 +123,9 @@ class Account extends EA_Controller
             return;
         }
 
+        $transaction_open = false;
+        $saved_version = null;
+
         try {
             $user_id = (int) session('user_id');
 
@@ -155,6 +158,20 @@ class Account extends EA_Controller
                 throw new RuntimeException('The current password is incorrect.');
             }
 
+            // The initial permission check above protects request parsing, but it
+            // is not sufficient for the write: an administrator may revoke the
+            // role while this request is being prepared. Lock the actor and its
+            // role in one transaction, then recheck the stored permission before
+            // Users_model performs any mutation.
+            if (!$this->db->trans_begin()) {
+                throw new RuntimeException('Could not start account save transaction.');
+            }
+            $transaction_open = true;
+
+            if (!$this->hasCurrentAccountPermission($user_id)) {
+                throw new RuntimeException('You do not have the required permissions for this task.');
+            }
+
             $this->users_model->save($account, $new_password === null ? null : $current_password);
 
             if ($new_password !== null) {
@@ -162,9 +179,16 @@ class Account extends EA_Controller
                 if ($saved_version === null) {
                     throw new RuntimeException('Could not confirm the new credential version.');
                 }
-                session(['credential_version' => $saved_version]);
             }
 
+            if (!$this->db->trans_status() || !$this->db->trans_commit()) {
+                throw new RuntimeException('Could not commit account save transaction.');
+            }
+            $transaction_open = false;
+
+            if ($saved_version !== null) {
+                session(['credential_version' => $saved_version]);
+            }
             session([
                 'user_email' => $account['email'],
                 'username' => $account['settings']['username'],
@@ -174,8 +198,40 @@ class Account extends EA_Controller
 
             response();
         } catch (Throwable $e) {
+            if ($transaction_open) {
+                $this->db->trans_rollback();
+            }
             json_exception($e);
         }
+    }
+
+    /**
+     * Lock the actor and role, then evaluate the persisted self-account permission.
+     */
+    protected function hasCurrentAccountPermission(int $user_id): bool
+    {
+        $actor = $this->db
+            ->query('SELECT `id`, `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE', [
+                $user_id,
+            ])
+            ->row_array();
+
+        if (!$actor || (int) ($actor['id'] ?? 0) !== $user_id || empty($actor['id_roles'])) {
+            return false;
+        }
+
+        $role = $this->db
+            ->query('SELECT `user_settings` FROM `' . $this->db->dbprefix('roles') . '` WHERE `id` = ? FOR UPDATE', [
+                (int) $actor['id_roles'],
+            ])
+            ->row_array();
+
+        $known_mask = PRIV_VIEW | PRIV_ADD | PRIV_EDIT | PRIV_DELETE;
+
+        return (bool) $role &&
+            (int) ($role['user_settings'] ?? -1) >= 0 &&
+            ((int) ($role['user_settings'] ?? -1) & ~$known_mask) === 0 &&
+            ((int) ($role['user_settings'] ?? 0) & PRIV_EDIT) === PRIV_EDIT;
     }
 
     /**

@@ -7,7 +7,16 @@ ROOT_DIR="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 SMOKE_SCRIPT="$ROOT_DIR/scripts/ci/compose_sensitive_ports_smoke.sh"
 IMPORT_SCRIPT="$ROOT_DIR/scripts/import_prod_backup.sh"
 workspace="$(mktemp -d "${TMPDIR:-/tmp}/fh-compose-guardrail.XXXXXX")"
-trap 'rm -rf -- "$workspace"' EXIT
+# The importer validates every ancestor of its dedicated known-hosts file.
+# Keep that fixture below the checked-out worktree instead of /tmp, whose
+# standard group/world-writable mode is intentionally rejected.
+known_hosts_root="$(mktemp -d "$ROOT_DIR/.fh-compose-known-hosts.XXXXXX")"
+known_hosts_root="$(realpath "$known_hosts_root")"
+chmod 0700 "$known_hosts_root"
+known_hosts_file="$known_hosts_root/known_hosts"
+printf 'synthetic-host-key\n' > "$known_hosts_file"
+chmod 0600 "$known_hosts_file"
+trap 'rm -rf -- "$workspace" "$known_hosts_root"' EXIT
 
 real_docker="$(command -v docker)"
 compose_json="$workspace/secure-compose.json"
@@ -205,6 +214,7 @@ import_output="$(
         IMPORT_SCP_CALLS="$import_scp_calls" \
         IMPORT_FIND_CALLS="$import_find_calls" \
         PROD_SSH_TARGET='root@synthetic.invalid' \
+        PROD_SSH_KNOWN_HOSTS_FILE="$known_hosts_file" \
         LOCAL_DOWNLOAD_ROOT="$workspace/import-downloads" \
         bash "$import_repo/scripts/import_prod_backup.sh" \
             --remote-backup-dir /root/backups/easyappointments/20260313T074134Z \
@@ -237,6 +247,7 @@ unsupported_output="$(
         IMPORT_SCP_CALLS="$import_scp_calls" \
         IMPORT_FIND_CALLS="$import_find_calls" \
         PROD_SSH_TARGET='root@synthetic.invalid' \
+        PROD_SSH_KNOWN_HOSTS_FILE="$known_hosts_file" \
         LOCAL_DOWNLOAD_ROOT="$workspace/unsupported-downloads" \
         bash "$import_repo/scripts/import_prod_backup.sh" \
             --remote-backup-dir /root/backups/easyappointments/20260313T074134Z \

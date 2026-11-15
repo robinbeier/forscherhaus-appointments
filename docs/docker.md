@@ -452,12 +452,15 @@ Recommended path for the current production host:
 
 ```bash
 bash ./scripts/import_prod_backup.sh \
-  --remote-backup-dir /root/backups/easyappointments/20260313T074134Z
+  --remote-backup-dir /root/backups/easyappointments/20260313T074134Z \
+  --ssh-known-hosts-file /path/to/dedicated/booking-server.known_hosts
 ```
 
 The script will:
 
 - use an existing canonical backup set on `root@booking-server` over Tailscale
+- require a separately enrolled, dedicated host-key file and ignore the user's
+  implicit SSH `known_hosts`; first-use host-key acceptance is disabled
 - verify the pinned local MySQL/nginx images and build the PHP-FPM image from
   digest-pinned, checksum-verified inputs before contacting the production host
 - download the dump plus metadata into a new, private directory under `/tmp`
@@ -495,11 +498,13 @@ Useful options:
 ```bash
 # reuse an existing remote backup directory
 bash ./scripts/import_prod_backup.sh \
-  --remote-backup-dir /root/backups/easyappointments/20260313T074134Z
+  --remote-backup-dir /root/backups/easyappointments/20260313T074134Z \
+  --ssh-known-hosts-file /path/to/dedicated/booking-server.known_hosts
 
 # leave only mysql/php-fpm/nginx running after the import
 bash ./scripts/import_prod_backup.sh \
   --remote-backup-dir /root/backups/easyappointments/20260313T074134Z \
+  --ssh-known-hosts-file /path/to/dedicated/booking-server.known_hosts \
   --core-services-only
 ```
 

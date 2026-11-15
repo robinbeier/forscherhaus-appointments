@@ -59,6 +59,14 @@ final class CspReportOnlyTest extends TestCase
         );
     }
 
+    public function testCollectorRouteUsesOnlyTheCanonicalHyphenatedPath(): void
+    {
+        self::assertTrue(Csp_report_only::isCollectorRequest(['REQUEST_URI' => '/csp-report?fixed=1']));
+        self::assertFalse(Csp_report_only::isCollectorRequest(['REQUEST_URI' => '/csp_report']));
+        self::assertTrue(Csp_report_only::isCollectorRequest(['REQUEST_URI' => '/index.php/csp-report']));
+        self::assertFalse(Csp_report_only::isCollectorRequest(['REQUEST_URI' => '/csp-report/']));
+    }
+
     public function testV2ConfigRequiresAnExactBoundedActivationWindow(): void
     {
         $now = 1_700_000_000;

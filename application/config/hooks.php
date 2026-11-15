@@ -20,13 +20,14 @@ $hook['pre_controller'] = static function (): void {
         return;
     }
 
-    // The CSP report receiver intentionally has its own bounded storage policy.
-    $uri = load_class('URI', 'core');
-    $controller = strtolower((string) ($uri->rsegments[1] ?? ''));
-    if ($controller === 'csp_report') {
+    // Only the canonical hyphenated collector route has its own bounded policy.
+    // Underscore aliases must remain covered by the general limiter.
+    if (Csp_report_only::isCollectorRequest($_SERVER)) {
         return;
     }
 
+    $uri = load_class('URI', 'core');
+    $controller = strtolower((string) ($uri->rsegments[1] ?? ''));
     $input = load_class('Input', 'core');
     $ip = (string) $input->ip_address();
     if (rate_limit_is_local_loopback_request($ip, $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? null))) {
