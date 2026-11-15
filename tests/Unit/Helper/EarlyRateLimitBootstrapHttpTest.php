@@ -75,6 +75,17 @@ final class EarlyRateLimitBootstrapHttpTest extends TestCase
                 self::assertSame('', $body);
             }
             self::assertSame(102, unserialize(file_get_contents($countPath), ['allowed_classes' => false])['data']);
+            $routeCountPath = $directory . '/cache/booking_unavailable_dates_rate_limit_key_127.0.0.1';
+            $routeRemainPath = $directory . '/cache/booking_unavailable_dates_rate_limit_tmp_127.0.0.1';
+            file_put_contents($routeCountPath, serialize(['time' => time(), 'ttl' => 120, 'data' => 20]));
+            file_put_contents($routeRemainPath, serialize(['time' => time(), 'ttl' => 240, 'data' => time() + 120]));
+            [$status, $headers, $body] = $this->request($address, 'booking/get_unavailable_dates');
+            self::assertSame(429, $status, $body . file_get_contents($directory . '/server.log'));
+            self::assertMatchesRegularExpression('/Retry-After: [1-9][0-9]*/i', $headers);
+            self::assertSame('', $body);
+            self::assertSame(21, unserialize(file_get_contents($routeCountPath), ['allowed_classes' => false])['data']);
+            unlink($routeCountPath);
+            unlink($routeRemainPath);
             unlink($countPath);
             unlink($remainPath);
             [$status, , $body] = $this->request($address, 'booking');

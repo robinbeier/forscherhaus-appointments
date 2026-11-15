@@ -23,6 +23,8 @@
  */
 class Booking extends EA_Controller
 {
+    private const MAX_UNAVAILABLE_DATES_PROVIDER_DAY_WORK = 512;
+
     private const CUSTOMER_TOKEN_CACHE_PREFIX = 'customer-token-v2-';
     public Reschedule_authority $reschedule_authority;
 
@@ -1188,6 +1190,18 @@ class Booking extends EA_Controller
                 }
 
                 json_response(['is_month_unavailable' => true]);
+
+                return;
+            }
+
+            if (count($provider_ids) * $number_of_days_in_month > self::MAX_UNAVAILABLE_DATES_PROVIDER_DAY_WORK) {
+                json_response(
+                    [
+                        'success' => false,
+                        'message' => lang('requested_hour_is_unavailable'),
+                    ],
+                    429,
+                );
 
                 return;
             }

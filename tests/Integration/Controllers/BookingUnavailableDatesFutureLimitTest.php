@@ -24,12 +24,29 @@ final class BookingUnavailableDatesFutureLimitTest extends ApplicationTestCase
 
     private ?int $serviceId = null;
 
+    private \EA_Output $originalOutput;
+
+    private \EA_Output $testOutput;
+
     /** @var array<string, array{exists:bool,value:?string}> */
     private array $settingSnapshots = [];
 
     protected function setUp(): void
     {
         parent::setUp();
+
+        $this->originalOutput = get_instance()->output;
+        $this->testOutput = new class extends \EA_Output {
+            public int $statusCode = 200;
+
+            public function set_status_header($code = 200, $text = '')
+            {
+                $this->statusCode = (int) $code;
+
+                return parent::set_status_header($code, $text);
+            }
+        };
+        get_instance()->output = $this->testOutput;
 
         $this->snapshotSetting('disable_booking');
         $this->snapshotSetting('future_booking_limit');
@@ -49,6 +66,7 @@ final class BookingUnavailableDatesFutureLimitTest extends ApplicationTestCase
     {
         $this->cleanupSyntheticFixture();
         $this->restoreSettings();
+        get_instance()->output = $this->originalOutput;
         parent::tearDown();
     }
 
@@ -105,9 +123,28 @@ final class BookingUnavailableDatesFutureLimitTest extends ApplicationTestCase
         );
     }
 
+    public function testRejectsAnyProviderMonthWhenProviderDayWorkExceedsBudget(): void
+    {
+        $this->createAdditionalProviders(16);
+        $nearMonth = (new DateTimeImmutable('first day of next month'))->format('Y-m-d');
+
+        $measurement = $this->measure($nearMonth, ANY_PROVIDER);
+
+        self::assertSame(429, $this->testOutput->statusCode);
+        self::assertSame(0, $measurement['availability_invocations']);
+        self::assertSame(
+            [
+                'success' => false,
+                'message' => lang('requested_hour_is_unavailable'),
+            ],
+            $measurement['response'],
+        );
+    }
+
     /** @return array{availability_invocations:int,query_delta:int,response:array} */
     private function measure(string $selectedDate, string $providerId): array
     {
+        $this->testOutput->statusCode = 200;
         $_POST = [];
         $_GET = [
             'provider_id' => $providerId,
@@ -221,12 +258,28 @@ final class BookingUnavailableDatesFutureLimitTest extends ApplicationTestCase
         $this->serviceId = $this->insertService();
         $settings = $CI->db->get_where('user_settings', ['id_users' => $source['id']])->row_array();
 
-        for ($index = 0; $index < 3; $index++) {
+        $this->createProviders(3, $source, $role, $settings);
+    }
+
+    private function createAdditionalProviders(int $count): void
+    {
+        $CI = &get_instance();
+        $role = $CI->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])->row_array();
+        $source = $CI->db->get_where('users', ['id_roles' => $role['id']])->row_array();
+        $settings = $CI->db->get_where('user_settings', ['id_users' => $source['id']])->row_array();
+        $this->createProviders($count, $source, $role, $settings);
+    }
+
+    private function createProviders(int $count, array $source, array $role, ?array $settings): void
+    {
+        $CI = &get_instance();
+        $offset = count($this->providerIds);
+        for ($index = 0; $index < $count; $index++) {
             $provider = $source;
             unset($provider['id']);
             $provider['first_name'] = 'ROB726';
-            $provider['last_name'] = 'Provider-' . $index;
-            $provider['email'] = 'rob726-' . bin2hex(random_bytes(8)) . '-' . $index . '@synthetic.invalid';
+            $provider['last_name'] = 'Provider-' . ($offset + $index);
+            $provider['email'] = 'rob726-' . bin2hex(random_bytes(8)) . '-' . ($offset + $index) . '@synthetic.invalid';
             $provider['id_roles'] = (int) $role['id'];
             $CI->db->insert('users', $provider);
             $id = (int) $CI->db->insert_id();
