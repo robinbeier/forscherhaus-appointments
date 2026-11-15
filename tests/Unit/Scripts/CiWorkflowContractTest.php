@@ -651,6 +651,20 @@ class CiWorkflowContractTest extends TestCase
         self::assertIsInt($seedIndex);
         self::assertLessThan($setupIndex, $serviceIndex);
         self::assertLessThan($seedIndex, $readinessIndex);
+        $seed = $this->gateBody($steps, 'Install deterministic seed instance', 'deep-runtime-suite-9');
+        self::assertStringContainsString(
+            'if [[ "${{ steps.ldap_guardrail.outputs.include_ldap }}" == "true" ]]; then',
+            $seed,
+        );
+        self::assertStringContainsString(
+            'sed -i "s/const LDAP_HOST = \'\';$/const LDAP_HOST = \'openldap\';/" config.php',
+            $seed,
+        );
+        self::assertStringContainsString("sed -i 's/const LDAP_PORT = 0;\$/const LDAP_PORT = 389;/' config.php", $seed);
+        self::assertStringContainsString('grep -Fq "const LDAP_HOST = \'openldap\';" config.php', $seed);
+        self::assertStringContainsString('grep -Fq "const LDAP_PORT = 389;" config.php', $seed);
+        self::assertStringContainsString('grep -Fq "const LDAP_HOST = \'\';" config.php', $seed);
+        self::assertStringContainsString('grep -Fq "const LDAP_PORT = 0;" config.php', $seed);
         $installBrowser = $this->gateBody($steps, 'Install Playwright smoke browser', 'deep-runtime-suite-12');
         $deepRuntime = $this->gateBody($steps, 'Run deep runtime suite', 'deep-runtime-suite-13');
 

@@ -1126,6 +1126,15 @@ jobs:
           install -m 0600 config-sample.php config.php
           sed -i "s/const BASE_URL = 'http:\/\/localhost';/const BASE_URL = 'http:\/\/127.0.0.1:8080';/" config.php
           sed -i "s/const DB_HOST = 'mysql';/const DB_HOST = '127.0.0.1';/" config.php
+          if [[ "${{ steps.ldap_guardrail.outputs.include_ldap }}" == "true" ]]; then
+            sed -i "s/const LDAP_HOST = '';$/const LDAP_HOST = 'openldap';/" config.php
+            sed -i 's/const LDAP_PORT = 0;$/const LDAP_PORT = 389;/' config.php
+            grep -Fq "const LDAP_HOST = 'openldap';" config.php
+            grep -Fq "const LDAP_PORT = 389;" config.php
+          else
+            grep -Fq "const LDAP_HOST = '';" config.php
+            grep -Fq "const LDAP_PORT = 0;" config.php
+          fi
           grep -Fq "const BASE_URL = 'http://127.0.0.1:8080';" config.php
           grep -Fq "const DB_HOST = '127.0.0.1';" config.php
           for attempt in 1 2 3; do
