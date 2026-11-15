@@ -56,17 +56,34 @@ final class CustomerPostGuardTest extends TestCase
         }
         $expected = array_merge(
             $expected,
-            $action === 'destroy'
+            $action === 'store'
                 ? [
-                    'users:value:17:id_roles',
-                    'roles:value:3:slug',
-                    'find:41',
-                    'delete:41',
+                    'only:' . json_encode(self::FIELDS, JSON_THROW_ON_ERROR),
+                    'optional:[]',
+                    'trans_active',
+                    'get_lock',
+                    'trans_begin',
+                    'lock_users:17',
+                    'lock_roles:3',
+                    'lock_settings:limit_customer_visibility',
+                    'insert_new:' . json_encode($this->payload($action), JSON_THROW_ON_ERROR),
+                    'find:42',
                     'trans_status',
                     'trans_commit',
                     'json_response',
+                    'release_lock',
                 ]
-                : $this->saveEvents($action),
+                : ($action === 'destroy'
+                    ? [
+                        'users:value:17:id_roles',
+                        'roles:value:3:slug',
+                        'find:41',
+                        'delete:41',
+                        'trans_status',
+                        'trans_commit',
+                        'json_response',
+                    ]
+                    : $this->saveEvents($action)),
         );
         self::assertSame($expected, $result['events']);
         self::assertSame(200, $result['status']);
@@ -111,7 +128,26 @@ final class CustomerPostGuardTest extends TestCase
         self::assertSame(403, $denied['status']);
         self::assertSame([], $denied['saved']);
         $allowed = $this->probe('store', 'nonadmin-open', 'POST');
-        self::assertSame(array_merge($prefix, ['dto:customer'], $this->saveEvents('store')), $allowed['events']);
+        self::assertSame(
+            array_merge($prefix, [
+                'dto:customer',
+                'only:' . json_encode(self::FIELDS, JSON_THROW_ON_ERROR),
+                'optional:[]',
+                'trans_active',
+                'get_lock',
+                'trans_begin',
+                'lock_users:17',
+                'lock_roles:3',
+                'lock_settings:limit_customer_visibility',
+                'insert_new:' . json_encode($this->payload('store'), JSON_THROW_ON_ERROR),
+                'find:42',
+                'trans_status',
+                'trans_commit',
+                'json_response',
+                'release_lock',
+            ]),
+            $allowed['events'],
+        );
         self::assertSame(200, $allowed['status']);
         self::assertSame([$this->payload('store')], $allowed['saved']);
         self::assertSame('{"success":true,"id":42}', $allowed['body']);
@@ -137,6 +173,93 @@ final class CustomerPostGuardTest extends TestCase
             ['success' => false, 'message' => 'Use the update endpoint to edit an existing record.'],
             json_decode($result['body'], true, 512, JSON_THROW_ON_ERROR),
         );
+    }
+
+    public function testStoreRejectsPermissionRevokedBeforeLockedInsert(): void
+    {
+        $result = $this->probe('store', 'revoked-late', 'POST');
+        self::assertSame(
+            [
+                'session:user_id',
+                'auth:add:customers:17',
+                'users:value:17:id_roles',
+                'roles:value:3:slug',
+                'dto:customer',
+                'only:' . json_encode(self::FIELDS, JSON_THROW_ON_ERROR),
+                'optional:[]',
+                'trans_active',
+                'get_lock',
+                'trans_begin',
+                'lock_users:17',
+                'lock_roles:3',
+                'trans_rollback',
+                'abort:403',
+            ],
+            $result['events'],
+        );
+        self::assertSame(403, $result['status']);
+        self::assertSame([], $result['saved']);
+    }
+
+    public function testStoreRejectsLateVisibilityRestrictionBeforeInsert(): void
+    {
+        $result = $this->probe('store', 'visibility-revoked-late', 'POST');
+        self::assertSame(
+            [
+                'session:user_id',
+                'auth:add:customers:17',
+                'users:value:17:id_roles',
+                'roles:value:3:slug',
+                'setting:limit_customer_visibility',
+                'dto:customer',
+                'only:' . json_encode(self::FIELDS, JSON_THROW_ON_ERROR),
+                'optional:[]',
+                'trans_active',
+                'get_lock',
+                'trans_begin',
+                'lock_users:17',
+                'lock_roles:3',
+                'lock_settings:limit_customer_visibility',
+                'trans_rollback',
+                'abort:403',
+            ],
+            $result['events'],
+        );
+        self::assertSame(403, $result['status']);
+        self::assertSame([], $result['saved']);
+    }
+
+    public function testStoreFailsClosedWhenTransactionAlreadyActiveBeforeIdentityLock(): void
+    {
+        $result = $this->probe('store', 'nested-transaction', 'POST');
+        self::assertSame(
+            [
+                'session:user_id',
+                'auth:add:customers:17',
+                'users:value:17:id_roles',
+                'roles:value:3:slug',
+                'dto:customer',
+                'only:' . json_encode(self::FIELDS, JSON_THROW_ON_ERROR),
+                'optional:[]',
+                'trans_active',
+                'json_exception',
+            ],
+            $result['events'],
+        );
+        self::assertSame(500, $result['status']);
+        self::assertSame([], $result['saved']);
+        self::assertStringContainsString('cannot join an existing transaction', $result['body']);
+    }
+
+    public function testStoreReleasesIdentityLockAfterRollback(): void
+    {
+        $result = $this->probe('store', 'commit-fails', 'POST');
+        $rollback = array_search('trans_rollback', $result['events'], true);
+        $release = array_search('release_lock', $result['events'], true);
+        self::assertIsInt($rollback);
+        self::assertIsInt($release);
+        self::assertLessThan($release, $rollback);
+        self::assertSame(500, $result['status']);
     }
 
     public function testDeniedCustomerAccessStopsBeforeSaveFindOrDelete(): void

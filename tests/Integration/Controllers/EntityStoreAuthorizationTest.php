@@ -223,6 +223,43 @@ final class EntityStoreAuthorizationTest extends TestCase
         );
     }
 
+    public function testCustomerCreateRejectsCallerOwnedTransactionWithoutChangingIt(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $this->authenticateAsProvider($pair['provider_id']);
+        $email = 'store-outer-transaction-' . bin2hex(random_bytes(4)) . '@example.org';
+
+        self::assertTrue(get_instance()->db->trans_begin());
+        try {
+            $_POST['customer'] = $this->customerPayload($email, 'Outer');
+            $this->customersController()->store();
+
+            $response = $this->decodeJsonOutput();
+            self::assertFalse($response['success'] ?? true, json_encode($response, JSON_THROW_ON_ERROR));
+            self::assertStringContainsString('cannot join an existing transaction', $response['message'] ?? '');
+            self::assertTrue(get_instance()->db->trans_active());
+        } finally {
+            get_instance()->db->trans_rollback();
+        }
+
+        self::assertSame(0, (int) get_instance()->db->where('email', $email)->count_all_results('users'));
+    }
+
+    public function testCustomerCreateSerializesVisibilitySettingWithInsert(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 3) . '/application/controllers/Customers.php');
+        $setting_lock = strpos($source, 'WHERE `name` = ? FOR UPDATE');
+        $insert = strpos(
+            $source,
+            '$customer_id = $this->customers_model->insert_new($customer, $creation_identity_lock);',
+        );
+
+        self::assertNotFalse($setting_lock);
+        self::assertNotFalse($insert);
+        self::assertLessThan($insert, $setting_lock);
+        self::assertStringContainsString('limit_customer_visibility', substr($source, $setting_lock - 220, 320));
+    }
+
     public function testExistingCustomerEmailWithoutIdCannotChangeExistingRecord(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();
@@ -322,7 +359,6 @@ final class EntityStoreAuthorizationTest extends TestCase
         $controller->permissions = $CI->permissions;
         $controller->users_model = $CI->users_model;
         $controller->roles_model = $CI->roles_model;
-
         return $controller;
     }
 

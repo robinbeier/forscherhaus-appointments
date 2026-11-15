@@ -3,6 +3,10 @@ declare(strict_types=1);
 define('BASEPATH', __DIR__);
 define('APPPATH', dirname(__DIR__, 2) . '/application/');
 define('PRIV_CUSTOMERS', 'customers');
+define('PRIV_VIEW', 1);
+define('PRIV_ADD', 2);
+define('PRIV_EDIT', 4);
+define('PRIV_DELETE', 8);
 define('DB_SLUG_ADMIN', 'admin');
 $action = $argv[1];
 $scenario = $argv[2];
@@ -22,7 +26,11 @@ function session(string $key): mixed
 {
     global $scenario, $events;
     $events[] = 'session:' . $key;
-    return $key === 'user_id' ? 17 : (str_starts_with($scenario, 'nonadmin-') ? 'secretary' : DB_SLUG_ADMIN);
+    return $key === 'user_id'
+        ? 17
+        : (str_starts_with($scenario, 'nonadmin-') || $scenario === 'visibility-revoked-late'
+            ? 'secretary'
+            : DB_SLUG_ADMIN);
 }
 function setting(string $key): mixed
 {
@@ -71,6 +79,14 @@ class EA_Controller
 }
 class ProbeDb
 {
+    public string $database = 'synthetic';
+
+    public function trans_active(): bool
+    {
+        $GLOBALS['events'][] = 'trans_active';
+        return $GLOBALS['scenario'] === 'nested-transaction';
+    }
+
     public function trans_begin(): bool
     {
         $GLOBALS['events'][] = 'trans_begin';
@@ -84,7 +100,7 @@ class ProbeDb
     public function trans_commit(): bool
     {
         $GLOBALS['events'][] = 'trans_commit';
-        return true;
+        return $GLOBALS['scenario'] !== 'commit-fails';
     }
     public function trans_rollback(): bool
     {
@@ -97,6 +113,41 @@ class ProbeDb
     }
     public function query(string $sql, array $params): ProbeDbResult
     {
+        if (str_contains($sql, 'GET_LOCK')) {
+            $GLOBALS['events'][] = 'get_lock';
+            return new ProbeDbResult([['acquired' => 1]]);
+        }
+        if (str_contains($sql, 'RELEASE_LOCK')) {
+            $GLOBALS['events'][] = 'release_lock';
+            return new ProbeDbResult([['released' => 1]]);
+        }
+        if (str_contains($sql, '`id_roles`')) {
+            $GLOBALS['events'][] = 'lock_users:' . implode(',', $params);
+            return new ProbeDbResult([['id_roles' => 3]]);
+        }
+        if (str_contains($sql, '`slug`, `customers`')) {
+            $GLOBALS['events'][] = 'lock_roles:' . implode(',', $params);
+            $mask =
+                $GLOBALS['scenario'] === 'revoked-late'
+                    ? PRIV_VIEW
+                    : (str_starts_with($GLOBALS['scenario'], 'nonadmin-')
+                        ? PRIV_VIEW | PRIV_ADD
+                        : PRIV_VIEW | PRIV_ADD | PRIV_EDIT | PRIV_DELETE);
+            return new ProbeDbResult([
+                [
+                    'slug' =>
+                        str_starts_with($GLOBALS['scenario'], 'nonadmin-') ||
+                        $GLOBALS['scenario'] === 'visibility-revoked-late'
+                            ? 'secretary'
+                            : DB_SLUG_ADMIN,
+                    'customers' => $mask,
+                ],
+            ]);
+        }
+        if (str_contains($sql, '`value`') && str_contains($sql, '`settings`')) {
+            $GLOBALS['events'][] = 'lock_settings:limit_customer_visibility';
+            return new ProbeDbResult([['value' => $GLOBALS['scenario'] === 'visibility-revoked-late' ? '1' : '0']]);
+        }
         if (str_contains($sql, '`users`')) {
             $GLOBALS['events'][] = 'lock_users:' . implode(',', $params);
             return new ProbeDbResult(2);
@@ -127,6 +178,17 @@ class ProbeDbResult
     {
         return is_array($this->rows) ? $this->rows : [];
     }
+
+    /** @return array<string, mixed> */
+    public function row_array(): array
+    {
+        return is_array($this->rows) ? $this->rows[0] ?? [] : [];
+    }
+
+    public function row(): object
+    {
+        return (object) $this->row_array();
+    }
 }
 class ProbeUsersModel
 {
@@ -141,7 +203,9 @@ class ProbeRolesModel
     public function value(int $id, string $field): string
     {
         $GLOBALS['events'][] = "roles:value:$id:$field";
-        return str_starts_with($GLOBALS['scenario'], 'nonadmin-') ? 'secretary' : DB_SLUG_ADMIN;
+        return str_starts_with($GLOBALS['scenario'], 'nonadmin-') || $GLOBALS['scenario'] === 'visibility-revoked-late'
+            ? 'secretary'
+            : DB_SLUG_ADMIN;
     }
 }
 class Backoffice_request_dto_factory
