@@ -22,6 +22,12 @@ cancellation does not refund it. A reschedule is exempt only after its genuine
 server-issued authority has been verified. Shared networks share these limits.
 No extra CAPTCHA, email verification or invitation requirement is introduced.
 
+The early limiter now keeps a bounded, prefix-scoped admission ledger and
+rejects new addresses once a bucket is full. This bounds new key creation but
+does not retroactively remove legacy cache pairs from earlier releases. Any
+legacy expired-pair cleanup must run as a separate, locked, expired-only
+operator action with its own inventory and rollback evidence.
+
 ## Future public customers and consents
 
 Migration 070 adds a dedicated public-origin marker and nullable exact customer
@@ -104,5 +110,8 @@ does not remove the timing difference.
 
 Public cancellation currently treats possession of the unpredictable
 appointment-management link as authority. The product decision on retaining
-link-only cancellation is pending. Until then, this is an open risk, not an
-accepted exception or a completed remediation.
+link-only cancellation is to retain the family flow for this sprint. A leaked
+or forwarded valid link can therefore still cancel its appointment. This is an
+accepted Medium-risk exception, not a completed remediation; link secrecy,
+single-appointment scope, the cancellation cutoff, and transaction checks
+reduce exposure but do not provide independent identity verification.

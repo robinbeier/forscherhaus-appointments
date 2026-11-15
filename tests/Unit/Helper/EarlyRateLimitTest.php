@@ -88,6 +88,143 @@ final class EarlyRateLimitTest extends TestCase
         self::assertSame(503, $this->worker());
     }
 
+    public function testNewAddressesAreBoundedPerBucketWithoutDirectoryScan(): void
+    {
+        $addresses = [];
+        $bucket = null;
+        for ($first = 0; $first < 256 && count($addresses) < 65; $first++) {
+            for ($second = 1; $second < 256 && count($addresses) < 65; $second++) {
+                $ip = '198.51.' . $first . '.' . $second;
+                $candidate = hexdec(substr(hash('sha256', 'rate_limit_key_' . $ip), 0, 8)) % 64;
+                if ($bucket === null) {
+                    $bucket = $candidate;
+                }
+                if ($candidate === $bucket) {
+                    $addresses[] = $ip;
+                }
+            }
+        }
+        self::assertCount(65, $addresses);
+
+        foreach (array_slice($addresses, 0, 64) as $ip) {
+            self::assertSame(200, $this->workerForIp($ip));
+        }
+        self::assertSame(503, $this->workerForIp($addresses[64]));
+        self::assertCount(1, glob($this->directory . '/rate_limit.ledger.*') ?: []);
+    }
+
+    public function testExpiredLedgerEntriesArePrunedUnderBucketLock(): void
+    {
+        $ip = '203.0.113.10';
+        $currentIp = '203.0.113.24';
+        $ledgerPath = $this->ledgerPath($ip);
+        file_put_contents(
+            $ledgerPath,
+            serialize([
+                'time' => time(),
+                'ttl' => 120,
+                'data' => ['rate_limit_key_' . $ip => time() - 1],
+            ]),
+        );
+        file_put_contents(
+            $this->directory . '/rate_limit_key_' . $ip,
+            serialize(['time' => time() - 10, 'ttl' => 1, 'data' => 1]),
+        );
+        file_put_contents(
+            $this->directory . '/rate_limit_tmp_' . $ip,
+            serialize(['time' => time() - 10, 'ttl' => 1, 'data' => time() - 1]),
+        );
+        self::assertSame(200, $this->workerForIp($currentIp));
+        self::assertFileDoesNotExist($this->directory . '/rate_limit_key_' . $ip);
+        self::assertFileDoesNotExist($this->directory . '/rate_limit_tmp_' . $ip);
+        $ledger = unserialize(file_get_contents($ledgerPath), ['allowed_classes' => false]);
+        self::assertArrayNotHasKey('rate_limit_key_' . $ip, $ledger['data']);
+        self::assertGreaterThan(time(), $ledger['data']['rate_limit_key_' . $currentIp]);
+    }
+
+    public function testActiveKeyRefreshesLedgerExpiry(): void
+    {
+        $ip = '203.0.113.10';
+        $ledgerPath = $this->ledgerPath($ip);
+        $oldExpiry = time() + 3;
+        file_put_contents(
+            $ledgerPath,
+            serialize(['time' => time(), 'ttl' => 120, 'data' => ['rate_limit_key_' . $ip => $oldExpiry]]),
+        );
+        self::assertSame(200, $this->workerForIp($ip));
+        $ledger = unserialize(file_get_contents($ledgerPath), ['allowed_classes' => false]);
+        self::assertGreaterThan($oldExpiry, $ledger['data']['rate_limit_key_' . $ip]);
+    }
+
+    public function testLegacyFileCannotBypassFullLedgerCap(): void
+    {
+        $ip = '203.0.113.10';
+        $ledgerPath = $this->ledgerPath($ip);
+        $entries = [];
+        for ($index = 0; $index < 64; $index++) {
+            $entries['rate_limit_key_198.51.0.' . $index] = time() + 120;
+        }
+        file_put_contents($ledgerPath, serialize(['time' => time(), 'ttl' => 120, 'data' => $entries]));
+        file_put_contents(
+            $this->directory . '/rate_limit_key_' . $ip,
+            serialize(['time' => time(), 'ttl' => 60, 'data' => 1]),
+        );
+        self::assertSame(503, $this->workerForIp($ip));
+    }
+
+    public function testMalformedLedgerFailsClosed(): void
+    {
+        $ip = '203.0.113.10';
+        $ledgerPath = $this->ledgerPath($ip);
+        file_put_contents(
+            $ledgerPath,
+            serialize([
+                'time' => time(),
+                'ttl' => 120,
+                'data' => ['unexpected' => 'not-an-expiry'],
+            ]),
+        );
+        self::assertSame(503, $this->workerForIp($ip));
+    }
+
+    public function testLedgerPathTraversalKeyFailsClosedWithoutDeletingOutsideFile(): void
+    {
+        $ip = '203.0.113.10';
+        $ledgerPath = $this->ledgerPath($ip);
+        $outside = $this->root . '/outside-sentinel';
+        file_put_contents($outside, 'keep');
+        file_put_contents(
+            $ledgerPath,
+            serialize([
+                'time' => time(),
+                'ttl' => 120,
+                'data' => ['rate_limit_key_../../outside-sentinel' => time() - 1],
+            ]),
+        );
+
+        self::assertSame(503, $this->workerForIp($ip));
+        self::assertFileExists($outside);
+        self::assertSame('keep', file_get_contents($outside));
+    }
+
+    public function testExpiredLedgerForAnotherPrefixDoesNotBlockCurrentPrefix(): void
+    {
+        $ip = '203.0.113.10';
+        $globalLedger = $this->ledgerPath($ip);
+        file_put_contents(
+            $globalLedger,
+            serialize([
+                'time' => time(),
+                'ttl' => 120,
+                'data' => ['rate_limit_key_' . $ip => time() - 1],
+            ]),
+        );
+
+        self::assertSame(200, $this->workerForIpWithPrefixes($ip, 'booking_creation_key_', 'booking_creation_tmp_'));
+        self::assertFileExists($globalLedger);
+        self::assertCount(2, glob($this->directory . '/rate_limit.ledger.*') ?: []);
+    }
+
     public function testCreationWindowsDoNotShareOrRefundTheHourlyBudget(): void
     {
         Early_rate_limit::enforce(
@@ -109,6 +246,7 @@ final class EarlyRateLimitTest extends TestCase
         self::assertSame(1, $this->entry('booking_creation_key_')['data']);
         self::assertSame(1, $this->entry('booking_creation_hour_key_')['data']);
         self::assertSame(3600, $this->entry('booking_creation_hour_key_')['ttl']);
+        self::assertCount(2, glob($this->directory . '/rate_limit.ledger.*') ?: []);
     }
 
     public function testConcurrentRequestsShareOneAtomicBudget(): void
@@ -141,12 +279,28 @@ final class EarlyRateLimitTest extends TestCase
         ]);
     }
 
-    private function worker(int $calls = 1, int $limit = 2): int
-    {
-        return $this->finishWorker($this->startWorker($calls, $limit));
+    private function ledgerPath(
+        string $ip,
+        string $keyPrefix = 'rate_limit_key_',
+        string $remainPrefix = 'rate_limit_tmp_',
+    ): string {
+        $bucket = hexdec(substr(hash('sha256', $keyPrefix . $ip), 0, 8)) % 64;
+        $scope = substr(hash('sha256', $keyPrefix . "\0" . $remainPrefix), 0, 8);
+
+        return $this->directory . '/rate_limit.ledger.' . $scope . '.' . sprintf('%02x', $bucket);
     }
 
-    private function startWorker(int $calls, int $limit): array
+    private function worker(int $calls = 1, int $limit = 2): int
+    {
+        return $this->workerForIp('203.0.113.10', $calls, $limit);
+    }
+
+    private function workerForIp(string $ip, int $calls = 1, int $limit = 2): int
+    {
+        return $this->finishWorker($this->startWorker($calls, $limit, $ip));
+    }
+
+    private function workerForIpWithPrefixes(string $ip, string $keyPrefix, string $remainPrefix): int
     {
         $id = bin2hex(random_bytes(5));
         $script = $this->root . '/worker-' . $id . '.php';
@@ -154,13 +308,46 @@ final class EarlyRateLimitTest extends TestCase
         file_put_contents(
             $script,
             str_replace(
-                ['__STATUS__', '__HELPER__', '__CALLS__', '__LIMIT__', '__CACHE__'],
+                ['__STATUS__', '__HELPER__', '__IP__', '__CACHE__', '__KEY_PREFIX__', '__REMAIN_PREFIX__'],
+                [
+                    var_export($status, true),
+                    var_export(APPPATH . 'core/Early_rate_limit.php', true),
+                    var_export($ip, true),
+                    var_export($this->directory, true),
+                    var_export($keyPrefix, true),
+                    var_export($remainPrefix, true),
+                ],
+                <<<'PHP'
+                <?php
+                define('BASEPATH', __DIR__ . '/');
+                register_shutdown_function(static function (): void { file_put_contents(__STATUS__, (string) (http_response_code() ?: 200)); });
+                require __HELPER__;
+                Early_rate_limit::enforce(__IP__, 2, 60, __CACHE__, __KEY_PREFIX__, __REMAIN_PREFIX__);
+                PHP
+                ,
+            ),
+        );
+        $process = proc_open([PHP_BINARY, $script], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        self::assertIsResource($process);
+        return $this->finishWorker([$process, $pipes, $status]);
+    }
+
+    private function startWorker(int $calls, int $limit, string $ip = '203.0.113.10'): array
+    {
+        $id = bin2hex(random_bytes(5));
+        $script = $this->root . '/worker-' . $id . '.php';
+        $status = $this->root . '/status-' . $id;
+        file_put_contents(
+            $script,
+            str_replace(
+                ['__STATUS__', '__HELPER__', '__CALLS__', '__LIMIT__', '__CACHE__', '__IP__'],
                 [
                     var_export($status, true),
                     var_export(APPPATH . 'core/Early_rate_limit.php', true),
                     (string) $calls,
                     (string) $limit,
                     var_export($this->directory, true),
+                    var_export($ip, true),
                 ],
                 <<<'PHP'
                 <?php
@@ -168,7 +355,7 @@ final class EarlyRateLimitTest extends TestCase
                 define('BASEPATH', __DIR__ . '/');
                 register_shutdown_function(static function (): void { file_put_contents(__STATUS__, (string) (http_response_code() ?: 200)); });
                 require __HELPER__;
-                for ($i = 0; $i < __CALLS__; $i++) { Early_rate_limit::enforce('203.0.113.10', __LIMIT__, 60, __CACHE__); }
+                for ($i = 0; $i < __CALLS__; $i++) { Early_rate_limit::enforce(__IP__, __LIMIT__, 60, __CACHE__); }
                 PHP
                 ,
             ),

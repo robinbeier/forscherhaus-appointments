@@ -1,6 +1,7 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed');
 
 require_once APPPATH . 'core/Read_only_probe_request.php';
+require_once APPPATH . 'core/Csp_report_only.php';
 
 if (!is_cli() && Read_only_probe_request::is()) {
     $probeBinding = Read_only_probe_request::binding();
@@ -326,7 +327,8 @@ $config['encryption_key'] = base64_encode(APPPATH);
 | 'sess_time_to_update'		= how many seconds between CI refreshing Session Information
 |
 */
-$config['sess_driver'] = Read_only_probe_request::is() ? 'null' : 'files';
+$config['sess_driver'] =
+    Read_only_probe_request::is() || Csp_report_only::isCollectorRequest($_SERVER) ? 'null' : 'files';
 $config['sess_cookie_name'] = 'ea_session';
 $config['sess_expiration'] = 7200;
 $config['sess_save_path'] = __DIR__ . '/../../storage/sessions';

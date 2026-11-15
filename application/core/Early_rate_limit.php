@@ -3,6 +3,8 @@
 /** Controller-independent file limiter for hooks which run before controllers exist. */
 final class Early_rate_limit
 {
+    private const TRACKING_CAPACITY_PER_BUCKET = 64;
+
     public static function enforce(
         string $ip,
         int $maxRequests,
@@ -36,9 +38,18 @@ final class Early_rate_limit
 
         try {
             $now = time();
+            $ledgerScope = substr(hash('sha256', $keyPrefix . "\0" . $remainPrefix), 0, 8);
+            $ledgerPath =
+                $cachePath . DIRECTORY_SEPARATOR . sprintf('rate_limit.ledger.%s.%02x', $ledgerScope, $bucket);
+            $ledger = self::readLedger($ledgerPath, $now, $keyPrefix, $remainPrefix);
+            $entryPath = $cachePath . DIRECTORY_SEPARATOR . $cacheKey;
+            if (!array_key_exists($cacheKey, $ledger)) {
+                if (count($ledger) >= self::TRACKING_CAPACITY_PER_BUCKET) {
+                    self::failClosed();
+                }
+            }
             $entry = self::read($cachePath . DIRECTORY_SEPARATOR . $cacheKey, $now);
             $remain = self::read($cachePath . DIRECTORY_SEPARATOR . $remainKey, $now);
-            $entryPath = $cachePath . DIRECTORY_SEPARATOR . $cacheKey;
             if ($entry === null && (file_exists($entryPath) || is_link($entryPath))) {
                 self::failClosed();
             }
@@ -75,7 +86,9 @@ final class Early_rate_limit
                     $count = $entry + 1;
                 }
             }
+            $ledger[$cacheKey] = $now + max(2, $duration * 2);
             if (
+                !self::write($ledgerPath, $ledger, max(2, $duration * 2)) ||
                 !self::write($cachePath . DIRECTORY_SEPARATOR . $cacheKey, $count, $duration) ||
                 !self::write($cachePath . DIRECTORY_SEPARATOR . $remainKey, $window, $duration * 2)
             ) {
@@ -118,6 +131,92 @@ final class Early_rate_limit
             return null;
         }
         return $value['data'];
+    }
+
+    /**
+     * Read the bounded per-bucket admission ledger. The ledger contains only
+     * key names and expiry timestamps; it is never scanned outside the
+     * already-held bucket lock.
+     *
+     * @return array<string,int>
+     */
+    private static function readLedger(string $path, int $now, string $keyPrefix, string $remainPrefix): array
+    {
+        $ledgerName = basename($path);
+        if (!preg_match('/\Arate_limit\.ledger\.([0-9a-f]{8})\.([0-9a-f]{2})\z/D', $ledgerName, $match)) {
+            self::failClosed();
+        }
+        $expectedScope = substr(hash('sha256', $keyPrefix . "\0" . $remainPrefix), 0, 8);
+        $expectedBucket = hexdec($match[2]);
+        if ($match[1] !== $expectedScope || $expectedBucket > 63) {
+            self::failClosed();
+        }
+        if (is_link($path) || is_dir($path)) {
+            self::failClosed();
+        }
+        if (!is_file($path)) {
+            return [];
+        }
+        $raw = @file_get_contents($path);
+        $value = $raw === false ? null : @unserialize($raw, ['allowed_classes' => false]);
+        if (
+            !is_array($value) ||
+            !array_key_exists('time', $value) ||
+            !array_key_exists('ttl', $value) ||
+            !array_key_exists('data', $value) ||
+            !is_int($value['time']) ||
+            !is_int($value['ttl']) ||
+            $value['ttl'] < 0 ||
+            !is_array($value['data'])
+        ) {
+            self::failClosed();
+        }
+        $value = $value['data'];
+        if (count($value) > self::TRACKING_CAPACITY_PER_BUCKET) {
+            self::failClosed();
+        }
+        $active = [];
+        $changed = false;
+        foreach ($value as $key => $expires) {
+            if (
+                !is_string($key) ||
+                !self::validLedgerKey($key, $keyPrefix) ||
+                hexdec(substr(hash('sha256', $key), 0, 8)) % 64 !== $expectedBucket ||
+                !is_int($expires) ||
+                $expires <= 0
+            ) {
+                self::failClosed();
+            }
+            if ($expires > $now) {
+                $active[$key] = $expires;
+                continue;
+            }
+            if (!str_starts_with($key, $keyPrefix)) {
+                self::failClosed();
+            }
+            $suffix = substr($key, strlen($keyPrefix));
+            $remainPath = dirname($path) . DIRECTORY_SEPARATOR . $remainPrefix . $suffix;
+            foreach ([dirname($path) . DIRECTORY_SEPARATOR . $key, $remainPath] as $stalePath) {
+                if (is_link($stalePath) || is_dir($stalePath)) {
+                    self::failClosed();
+                }
+                if (is_file($stalePath) && !@unlink($stalePath)) {
+                    self::failClosed();
+                }
+            }
+            $changed = true;
+        }
+        if ($changed && !self::write($path, $active, 1)) {
+            self::failClosed();
+        }
+        return $active;
+    }
+
+    private static function validLedgerKey(string $key, string $keyPrefix): bool
+    {
+        $suffix = str_starts_with($key, $keyPrefix) ? substr($key, strlen($keyPrefix)) : '';
+
+        return $suffix !== '' && strlen($suffix) <= 64 && preg_match('/\A[0-9A-Za-z._-]+\z/D', $suffix) === 1;
     }
 
     private static function write(string $path, mixed $data, int $ttl): bool

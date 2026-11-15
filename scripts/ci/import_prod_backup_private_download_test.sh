@@ -57,6 +57,9 @@ run_download() {
             'REMOTE_BACKUP_DIR=/root/backups/easyappointments/20260313T074134Z' \
             'PROD_SSH_TARGET=synthetic@invalid' \
             'SSH_OPTIONS=(-o synthetic)' \
+            "SSH_KNOWN_HOSTS_FILE=$workspace/known_hosts" \
+            "printf synthetic-host-key > $workspace/known_hosts" \
+            'assert_known_hosts_stable() { [[ -f "$SSH_KNOWN_HOSTS_FILE" && ! -L "$SSH_KNOWN_HOSTS_FILE" ]]; }' \
             'log() { :; }' \
             "$function_body" \
             'download_remote_backup' \
@@ -116,6 +119,9 @@ symlink_script="$workspace/run-symlink-download.sh"
         'REMOTE_BACKUP_DIR=/root/backups/easyappointments/20260313T074135Z' \
         'PROD_SSH_TARGET=synthetic@invalid' \
         'SSH_OPTIONS=(-o synthetic)' \
+        "SSH_KNOWN_HOSTS_FILE=$workspace/known_hosts" \
+        "printf synthetic-host-key > $workspace/known_hosts" \
+        'assert_known_hosts_stable() { [[ -f "$SSH_KNOWN_HOSTS_FILE" && ! -L "$SSH_KNOWN_HOSTS_FILE" ]]; }' \
         'log() { :; }' \
         "$function_body" \
         'download_remote_backup' \

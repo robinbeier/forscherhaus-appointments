@@ -69,6 +69,44 @@ final class CspReportHttpTest extends TestCase
         }
     }
 
+    public function testRepeatedCollectorRequestsWithoutCookiesDoNotCreateSessionFiles(): void
+    {
+        self::assertNotNull($this->server);
+        self::assertSame([], glob($this->server->directory . '/sessions/*') ?: []);
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $response = $this->server->client()->requestRawApp('POST', 'csp-report', '{}', 'application/csp-report');
+            self::assertSame(404, $response->statusCode, $response->body);
+            self::assertNull($response->header('set-cookie'));
+        }
+
+        self::assertSame([], glob($this->server->directory . '/sessions/*') ?: []);
+    }
+
+    public function testControllerAliasesAlsoAvoidSessionFilesAndUseNormalBoundary(): void
+    {
+        self::assertNotNull($this->server);
+        foreach (['csp_report', 'index.php/csp_report', 'csp_report/index'] as $path) {
+            $response = $this->server->client()->requestRawApp('POST', $path, '{}', 'application/csp-report');
+            self::assertContains($response->statusCode, [403, 404], $path . ': ' . $response->body);
+        }
+        self::assertSame([], glob($this->server->directory . '/sessions/*') ?: []);
+    }
+
+    public function testCanonicalIndexPhpCollectorRouteAlsoAvoidsSessionFiles(): void
+    {
+        self::assertNotNull($this->server);
+        $response = (new GateHttpClient($this->server->baseUrl, indexPage: ''))->requestRawApp(
+            'POST',
+            'index.php/csp-report',
+            '{}',
+            'application/csp-report',
+        );
+        self::assertSame(404, $response->statusCode, $response->body);
+        self::assertNull($response->header('set-cookie'));
+        self::assertSame([], glob($this->server->directory . '/sessions/*') ?: []);
+    }
+
     /**
      * Exercise the controller's early return against a prefilled future rate
      * window. The fixed production config path is created only when absent and
