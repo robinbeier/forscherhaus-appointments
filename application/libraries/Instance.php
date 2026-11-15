@@ -132,7 +132,7 @@ class Instance
             'services' => [$service_id],
             'settings' => [
                 'username' => 'janedoe',
-                'password' => random_string(),
+                'password' => bin2hex(random_bytes(24)),
                 'working_plan' => setting('company_working_plan'),
                 'working_plan_exceptions' => '{}',
                 'notifications' => true,

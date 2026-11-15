@@ -1,4 +1,8 @@
 services:
+    php-fpm:
+        volumes:
+            - './docker/config.ci.php:/var/www/html/config.php:ro'
+
     nginx:
         ports: !reset []
 

@@ -36,8 +36,11 @@
                                 <label class="form-label" for="matomo-analytics-url">
                                     <?= lang('matomo_analytics_url') ?>
                                 </label>
-                                <input id="matomo-analytics-url" placeholder="//example.org/url/to/matomo/"
-                                       data-field="matomo_analytics_url" class="form-control">
+                                <input id="matomo-analytics-url"
+                                       value="<?= e(
+                                           defined('Config::MATOMO_ANALYTICS_URL') ? Config::MATOMO_ANALYTICS_URL : '',
+                                       ) ?>"
+                                       class="form-control" readonly>
                                 <div class="form-text text-muted">
                                     <small>
                                         <?= lang('matomo_analytics_url_hint') ?>

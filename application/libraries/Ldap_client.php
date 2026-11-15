@@ -82,8 +82,7 @@ class Ldap_client
 
         // Connect to LDAP server
 
-        $ldap_host = setting('ldap_host');
-        $ldap_port = (int) setting('ldap_port');
+        [$ldap_host, $ldap_port] = $this->configuredEndpoint();
 
         $connection = $this->establishSecureConnection($ldap_host, $ldap_port);
 
@@ -193,6 +192,38 @@ class Ldap_client
         }
 
         return $connection;
+    }
+
+    /**
+     * Return the operator-pinned LDAP endpoint.
+     *
+     * Host and port settings in the database are intentionally not consulted:
+     * callers with database write access must not be able to redirect a bind.
+     *
+     * @return array{0:string,1:int}
+     * @throws LdapOperationalException When the local deployment is unconfigured.
+     */
+    protected function configuredEndpoint(): array
+    {
+        if (!defined('Config::LDAP_HOST') || !defined('Config::LDAP_PORT')) {
+            throw new LdapOperationalException('LDAP endpoint is not configured.');
+        }
+
+        $host = Config::LDAP_HOST;
+        $port = Config::LDAP_PORT;
+
+        if (
+            !is_string($host) ||
+            $host === '' ||
+            $host !== trim($host) ||
+            !is_int($port) ||
+            $port < 1 ||
+            $port > 65535
+        ) {
+            throw new LdapOperationalException('LDAP endpoint is not configured.');
+        }
+
+        return [$host, $port];
     }
 
     protected function setTlsCertificateVerification(): bool

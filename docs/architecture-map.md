@@ -17,7 +17,7 @@ This map defines component boundaries, path ownership scope, and dependency edge
 | `scheduling-backoffice` | Calendar & Scheduling | booking-lifecycle, integrations-sync, people-services-admin, settings-compliance, shared-core | 17 | 3 |
 | `dashboard-exports` | Dashboard & Exports | scheduling-backoffice, people-services-admin, shared-core | 11 | 3 |
 | `people-services-admin` | People, Providers, Services | booking-lifecycle, integrations-sync, scheduling-backoffice, settings-compliance, shared-core | 25 | 3 |
-| `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 27 | 3 |
+| `settings-compliance` | Settings & Compliance | auth-session, integrations-sync, people-services-admin, scheduling-backoffice, shared-core | 28 | 3 |
 | `integrations-sync` | Integrations & Sync | auth-session, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 6 | 1 |
 | `api-v1` | REST API v1 | auth-session, booking-public, integrations-sync, people-services-admin, scheduling-backoffice, settings-compliance, shared-core | 5 | 3 |
 | `shared-core` | Shared Core | None | 16 | 3 |
@@ -279,6 +279,7 @@ Path rules:
 - `assets/js/pages/matomo_analytics_settings.js` (exact_file)
 - `assets/js/pages/legal_settings.js` (exact_file)
 - `application/views/components/company_color_style.php` (exact_file)
+- `application/views/components/matomo_analytics_script.php` (exact_file)
 
 Key files:
 - `application/controllers/Business_settings.php`

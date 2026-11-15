@@ -79,7 +79,9 @@ const DATE_FORMAT_YMD = 'YMD';
 const TIME_FORMAT_REGULAR = 'regular';
 const TIME_FORMAT_MILITARY = 'military';
 
-const MIN_PASSWORD_LENGTH = 7;
+// New and changed account passwords must resist short-password guessing.
+// Existing hashes remain valid until the account owner changes the password.
+const MIN_PASSWORD_LENGTH = 12;
 const MAX_PASSWORD_LENGTH = 100;
 // Reader-first rollout guard; enable only after all deployed readers support Argon2id.
 const MODERN_PASSWORD_WRITES = true;

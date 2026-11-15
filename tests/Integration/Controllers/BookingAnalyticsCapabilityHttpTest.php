@@ -173,10 +173,10 @@ final class BookingAnalyticsCapabilityHttpTest extends TestCase
     {
         self::assertStringContainsString(self::GOOGLE_CODE, $body);
         self::assertStringContainsString('googletagmanager.com/gtag/js?id=' . self::GOOGLE_CODE, $body);
-        self::assertStringContainsString(self::MATOMO_URL, $body);
-        self::assertStringContainsString("g.src = u + 'matomo.js'", $body);
-        self::assertStringContainsString("_paq.push(['trackPageView'])", $body);
-        self::assertStringContainsString(self::MATOMO_URL . 'matomo.php', $body);
+        // A database-stored URL can no longer activate executable Matomo code.
+        self::assertStringNotContainsString(self::MATOMO_URL, $body);
+        self::assertStringNotContainsString('matomo.js', $body);
+        self::assertStringNotContainsString('matomo.php', $body);
     }
 
     private function assertAnalyticsAbsent(string $body): void

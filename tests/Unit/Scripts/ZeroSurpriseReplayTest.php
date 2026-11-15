@@ -12,6 +12,26 @@ require_once __DIR__ . '/../../../scripts/release-gate/zero_surprise_replay.php'
 
 class ZeroSurpriseReplayTest extends TestCase
 {
+    public function testHttpReadinessDiagnosticsRetainOnlyNumericFailureOutcomes(): void
+    {
+        self::assertSame(
+            ['curl_exit_code' => 22, 'http_status_code' => 500],
+            httpReadinessDiagnostics([
+                'exit_code' => 22,
+                'stdout' => '500',
+                'stderr' => 'private runtime detail',
+            ]),
+        );
+        self::assertSame(
+            ['curl_exit_code' => 6, 'http_status_code' => 0],
+            httpReadinessDiagnostics(['exit_code' => 6, 'stdout' => '000']),
+        );
+        self::assertSame(
+            ['curl_exit_code' => null, 'http_status_code' => null],
+            httpReadinessDiagnostics(['exit_code' => '22', 'stdout' => '500 private runtime detail']),
+        );
+    }
+
     public function testReplayRuntimePreflightRequiresDigestPinnedImagesAndCapturesBuildIdentities(): void
     {
         $commands = [];

@@ -216,6 +216,11 @@ class Backoffice_request_dto_factory
                 'settings' => [['name' => 'api_token', 'id' => 41, 'value' => 'attacker-controlled']],
             ];
         }
+        if ($scenario === 'malicious' && $key === 'matomo_analytics_settings') {
+            return (object) [
+                'settings' => [['name' => 'matomo_analytics_url', 'value' => 'https://attacker.invalid/']],
+            ];
+        }
         if ($scenario === 'invalid_value' && $key === 'general_settings') {
             return (object) [
                 'settings' => [['name' => 'company_name', 'value' => ['nested' => 'value']]],
@@ -228,10 +233,7 @@ class Backoffice_request_dto_factory
         }
         if ($key === 'ldap_settings') {
             return (object) [
-                'settings' => [
-                    ['name' => 'ldap_is_active', 'value' => '1', 'extra' => 'drop-me'],
-                    ['name' => 'ldap_host', 'value' => 'ldap.synthetic.invalid', 'extra' => 'drop-me-too'],
-                ],
+                'settings' => [['name' => 'ldap_is_active', 'value' => '1', 'extra' => 'drop-me']],
             ];
         }
         if ($key === 'legal_settings') {
@@ -252,14 +254,7 @@ class Backoffice_request_dto_factory
         }
         if ($key === 'matomo_analytics_settings') {
             return (object) [
-                'settings' => [
-                    [
-                        'name' => 'matomo_analytics_url',
-                        'value' => 'https://matomo.synthetic.invalid/',
-                        'extra' => 'drop-me',
-                    ],
-                    ['name' => 'matomo_analytics_site_id', 'value' => '7', 'extra' => 'drop-me-too'],
-                ],
+                'settings' => [['name' => 'matomo_analytics_site_id', 'value' => '7', 'extra' => 'drop-me-too']],
             ];
         }
         if ($key === 'google_analytics_settings') {

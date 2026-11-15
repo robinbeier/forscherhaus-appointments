@@ -64,18 +64,24 @@ The current deterministic seeded user is:
 
 After making sure that the local OpenLDAP server works, Easy!Appointments will be able to connect to it.
 
-Open Backend > Settings > Integrations > LDAP to configure the host and port and enable LDAP login. The configured
-LDAP host must match the server certificate, and the PHP/OpenLDAP client must trust the issuing CA through its
+Set `Config::LDAP_HOST` and `Config::LDAP_PORT` in the operator-controlled local `config.php` to configure the bind
+destination, then open Backend > Settings > Integrations > LDAP to enable LDAP login. Database-backed host and port
+values are retained for legacy UI compatibility but are not used for authentication. The configured LDAP host must
+match the server certificate, and the PHP/OpenLDAP client must trust the issuing CA through its
 `LDAPTLS_CACERT` runtime configuration. Production CA material is provisioned outside this repository.
+
+The local CI overlay mounts `docker/config.ci.php` read-only with the synthetic `openldap:389` endpoint. Its LDAP
+smoke tests do not rewrite the operator's `config.php`.
 
 #### Host
 
-The server host address, provide "openldap" for Docker or your own host or IP.
+The server host address, provide "openldap" for Docker or your own host or IP in `Config::LDAP_HOST`.
 
 #### Port
 
 The server port number, provide 389 for Docker or your own server port value. The application requires StartTLS on
-the LDAP port before binding; an LDAPS-only server on port 636 is not compatible with this contract.
+the LDAP port before binding; an LDAPS-only server on port 636 is not compatible with this contract. Set the port in
+`Config::LDAP_PORT`.
 
 ## LDAP SSO
 
