@@ -295,12 +295,18 @@ class Customers extends EA_Controller
 
         try {
             $user_id = (int) session('user_id');
-            if (!$user_id) {
+            if (!$user_id || cannot('add', PRIV_CUSTOMERS, $user_id)) {
                 abort(403, 'Forbidden');
             }
             if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
                 abort(405, 'Method Not Allowed', ['Allow: POST']);
                 return;
+            }
+
+            $role_id = (int) $this->users_model->value($user_id, 'id_roles');
+            $role_slug = (string) $this->roles_model->value($role_id, 'slug');
+            if ($role_slug !== DB_SLUG_ADMIN && setting('limit_customer_visibility')) {
+                abort(403);
             }
 
             $request_dto = $this->backofficeRequestDtoFactory()->buildEntityPayloadRequestDto('customer');

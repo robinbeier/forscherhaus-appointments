@@ -3,6 +3,10 @@ declare(strict_types=1);
 define('BASEPATH', __DIR__);
 define('APPPATH', dirname(__DIR__, 2) . '/application/');
 define('PRIV_CUSTOMERS', 'customers');
+define('PRIV_VIEW', 1);
+define('PRIV_ADD', 2);
+define('PRIV_EDIT', 4);
+define('PRIV_DELETE', 8);
 define('DB_SLUG_ADMIN', 'admin');
 $action = $argv[1];
 $scenario = $argv[2];
@@ -71,6 +75,12 @@ class EA_Controller
 }
 class ProbeDb
 {
+    public function trans_active(): bool
+    {
+        $GLOBALS['events'][] = 'trans_active';
+        return false;
+    }
+
     public function trans_begin(): bool
     {
         $GLOBALS['events'][] = 'trans_begin';
@@ -97,6 +107,25 @@ class ProbeDb
     }
     public function query(string $sql, array $params): ProbeDbResult
     {
+        if (str_contains($sql, '`id_roles`')) {
+            $GLOBALS['events'][] = 'lock_users:' . implode(',', $params);
+            return new ProbeDbResult([['id_roles' => 3]]);
+        }
+        if (str_contains($sql, '`slug`, `customers`')) {
+            $GLOBALS['events'][] = 'lock_roles:' . implode(',', $params);
+            $mask =
+                $GLOBALS['scenario'] === 'revoked-late'
+                    ? PRIV_VIEW
+                    : (str_starts_with($GLOBALS['scenario'], 'nonadmin-')
+                        ? PRIV_VIEW | PRIV_ADD
+                        : PRIV_VIEW | PRIV_ADD | PRIV_EDIT | PRIV_DELETE);
+            return new ProbeDbResult([
+                [
+                    'slug' => str_starts_with($GLOBALS['scenario'], 'nonadmin-') ? 'secretary' : DB_SLUG_ADMIN,
+                    'customers' => $mask,
+                ],
+            ]);
+        }
         if (str_contains($sql, '`users`')) {
             $GLOBALS['events'][] = 'lock_users:' . implode(',', $params);
             return new ProbeDbResult(2);
@@ -126,6 +155,12 @@ class ProbeDbResult
     public function result_array(): array
     {
         return is_array($this->rows) ? $this->rows : [];
+    }
+
+    /** @return array<string, mixed> */
+    public function row_array(): array
+    {
+        return is_array($this->rows) ? $this->rows[0] ?? [] : [];
     }
 }
 class ProbeUsersModel
