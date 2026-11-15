@@ -68,3 +68,18 @@ atomic counter concurrency, repeat book/cancel cycles, surviving appointments,
 staff updates followed by public rescheduling, eligible public rescheduling and
 a reached post-appointment-delete failure with complete rollback. These local
 synthetic proofs do not certify every production interleaving.
+
+## Security-sprint exception register (2026-11-15)
+
+The anonymous family booking flow remains an intentional product boundary. The
+security sprint retains the documented distributed-abuse risk: independent
+callers can consume finite appointment capacity despite the per-address and
+global budgets. This is an accepted exception for the current sprint because a
+stronger identity requirement would change the family booking flow. No claim
+of capacity fairness or complete abuse prevention follows from this decision.
+
+The latest Daybreak review also reported a Low-risk email-membership oracle:
+the anonymous response can reveal whether a submitted email is already known as
+a customer. The existing flow is retained by explicit decision. Email
+confirmation or another identity check is deferred; the finding remains open
+and must not be reported as remediated or as a zero-finding scan result.
