@@ -461,8 +461,9 @@ class Pdf_renderer
         $candidates = [];
 
         $configured = $config['base_url'] ?? env('PDF_RENDERER_URL', '');
+        $hasExplicitEndpoint = is_string($configured) && trim($configured) !== '';
 
-        if (is_string($configured) && trim($configured) !== '') {
+        if ($hasExplicitEndpoint) {
             $candidates[] = $configured;
         }
 
@@ -472,9 +473,15 @@ class Pdf_renderer
             $fallbacks = [$fallbacks];
         }
 
-        $defaults = $this->defaultEndpointsForRuntime();
+        $candidates = array_merge($candidates, $fallbacks);
 
-        $candidates = array_merge($candidates, $fallbacks, $defaults);
+        // An explicitly configured production endpoint is the sole implicit
+        // trust boundary. Do not send the token and HTML payload to a runtime
+        // default if that endpoint is unavailable. Development and container
+        // defaults remain available when no endpoint was configured.
+        if (!$hasExplicitEndpoint) {
+            $candidates = array_merge($candidates, $this->defaultEndpointsForRuntime());
+        }
 
         $normalized = [];
 
