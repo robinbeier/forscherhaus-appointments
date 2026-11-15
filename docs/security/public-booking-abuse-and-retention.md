@@ -68,3 +68,41 @@ atomic counter concurrency, repeat book/cancel cycles, surviving appointments,
 staff updates followed by public rescheduling, eligible public rescheduling and
 a reached post-appointment-delete failure with complete rollback. These local
 synthetic proofs do not certify every production interleaving.
+
+## Security-sprint open risks and exceptions (2026-11-15)
+
+The anonymous family booking flow remains an intentional product boundary. The
+security sprint retains the documented distributed-abuse risk: independent
+callers can consume finite appointment capacity despite the per-address and
+global budgets. This is an accepted exception for the current sprint because a
+stronger identity requirement would change the family booking flow. No claim
+of capacity fairness or complete abuse prevention follows from this decision.
+
+The repository now bounds a public unavailable-dates request to 512
+provider-day availability checks and applies a separate limit of 20 such
+requests per 120 seconds and IP. These source-level controls address the
+monthly calculation amplification, but the current production release does
+not yet contain them. They do not remove the accepted distributed-booking
+capacity risk.
+
+The latest Daybreak review also reported a Low-risk, source-level conditional
+email-membership risk. In current production, `display_email=0` rejects a
+non-empty email before any membership lookup, so the risk is inactive there;
+re-evaluate it if email display or lookup is enabled. The existing anonymous
+flow is retained by explicit decision. Email confirmation or another identity
+check is deferred; the accepted exception remains open and must not be
+reported as remediated or as a zero-finding scan result.
+
+The provisional full-repository scan also reported a Low-risk login timing
+difference when LDAP authentication is enabled: failed guesses for locally
+mapped LDAP accounts perform directory network work, whereas unknown and local
+accounts return earlier. The current production setting disables LDAP, so this
+path is inactive there. The source-level risk remains open for any future LDAP
+activation. A real fix needs a bounded, tested directory-work policy and an
+operator review of its load and availability effects; generic error text alone
+does not remove the timing difference.
+
+Public cancellation currently treats possession of the unpredictable
+appointment-management link as authority. The product decision on retaining
+link-only cancellation is pending. Until then, this is an open risk, not an
+accepted exception or a completed remediation.

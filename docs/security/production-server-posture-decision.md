@@ -121,6 +121,19 @@ Firewall and listener classes:
 | Public listeners | no-change | Only expected public listener classes were observed. | Recheck in ROB-397 via redacted doctor. |
 | Loopback services | no-change | Kuma, renderer and MariaDB were loopback-bound in the snapshot. | Recheck in ROB-397 via redacted doctor. |
 
+## Security-sprint exception register (2026-11-15)
+
+The CIS review identified that local password aging is not currently bounded by
+the benchmark's 365-day recommendation. The existing policy is retained as an
+accepted exception for this sprint. No bulk expiry change is authorized by
+this record; any future transition requires an account inventory, a user-safe
+rollout plan and a separate validation gate.
+
+This exception is distinct from application password hashing and does not
+represent a CIS certification. The sprint ledger remains the authoritative
+record of observed, open, accepted-exception, not-applicable and unassessed
+checks.
+
 ## Gate Requirements
 
 ### Header Gate
