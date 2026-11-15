@@ -122,7 +122,34 @@ class Google_analytics_settings extends EA_Controller
                 $settings[] = ['name' => $setting['name'], 'value' => $setting['value']];
             }
 
-            $this->settings_model->save_batch($settings);
+            $db = $this->settings_model->db;
+            $owns_transaction = !$db->trans_active();
+            if ($owns_transaction && !$db->trans_begin()) {
+                throw new RuntimeException('Could not start Google Analytics settings transaction.');
+            }
+
+            try {
+                if (!$this->lockAndCheckCurrentEditPermission($user_id, $db)) {
+                    if ($owns_transaction) {
+                        $db->trans_rollback();
+                        $owns_transaction = false;
+                    }
+                    abort(403, 'Forbidden');
+                    return;
+                }
+                $this->settings_model->save_batch($settings);
+                if (!$db->trans_status()) {
+                    throw new RuntimeException('Could not save Google Analytics settings.');
+                }
+                if ($owns_transaction && !$db->trans_commit()) {
+                    throw new RuntimeException('Could not commit Google Analytics settings.');
+                }
+            } catch (Throwable $exception) {
+                if ($owns_transaction) {
+                    $db->trans_rollback();
+                }
+                throw $exception;
+            }
 
             response();
         } catch (Throwable $e) {
@@ -152,5 +179,31 @@ class Google_analytics_settings extends EA_Controller
         $this->backoffice_request_dto_factory = $CI->backoffice_request_dto_factory;
 
         return $this->backoffice_request_dto_factory;
+    }
+
+    private function lockAndCheckCurrentEditPermission(int $user_id, object $db): bool
+    {
+        $actor_query = $db->query('SELECT `id_roles` FROM `' . $db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE', [
+            $user_id,
+        ]);
+        if ($actor_query === false) {
+            throw new RuntimeException('Could not lock Google Analytics settings actor.');
+        }
+        $actor = $actor_query->row_array();
+        if (!$actor) {
+            return false;
+        }
+
+        $role_query = $db->query(
+            'SELECT `system_settings` FROM `' . $db->dbprefix('roles') . '` WHERE `id` = ? FOR UPDATE',
+            [(int) $actor['id_roles']],
+        );
+        if ($role_query === false) {
+            throw new RuntimeException('Could not lock Google Analytics settings role.');
+        }
+        $role = $role_query->row_array();
+        $mask = (int) ($role['system_settings'] ?? 0);
+        $known_mask = PRIV_VIEW | PRIV_ADD | PRIV_EDIT | PRIV_DELETE;
+        return is_array($role) && $mask >= 0 && ($mask & ~$known_mask) === 0 && ($mask & PRIV_EDIT) === PRIV_EDIT;
     }
 }
