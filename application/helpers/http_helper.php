@@ -114,6 +114,11 @@ if (!function_exists('json_response')) {
     }
 }
 
+/**
+ * Client input rejected before a backoffice search reaches a model.
+ */
+final class BackofficeSearchInputException extends InvalidArgumentException {}
+
 if (!function_exists('json_exception')) {
     /**
      * Return a new json exception from the application.
@@ -126,6 +131,18 @@ if (!function_exists('json_exception')) {
      */
     function json_exception(Throwable $e): void
     {
+        if ($e instanceof BackofficeSearchInputException) {
+            json_response(
+                [
+                    'success' => false,
+                    'message' => 'Invalid search request.',
+                ],
+                400,
+            );
+
+            return;
+        }
+
         $message = $e->getMessage();
 
         if ($e instanceof mysqli_sql_exception && (!defined('ENVIRONMENT') || ENVIRONMENT !== 'development')) {

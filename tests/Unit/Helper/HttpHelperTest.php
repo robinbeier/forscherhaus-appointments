@@ -6,6 +6,8 @@ use RuntimeException;
 use Tests\TestCase;
 use Throwable;
 
+require_once APPPATH . 'libraries/Backoffice_request_dto_factory.php';
+
 class HttpHelperTest extends TestCase
 {
     private string|false $original_exception_ignore_args = false;
@@ -197,6 +199,45 @@ class HttpHelperTest extends TestCase
         $this->assertStringNotContainsString('"trace":"', $log_line);
         $this->assertStringNotContainsString('"frames":[', $log_line);
         $this->assertStringNotContainsString(' Trace: array (', $log_line);
+    }
+
+    public function testBackofficeSearchInputExceptionReturnsBadRequestWithoutLogging(): void
+    {
+        $originalOutput = get_instance()->output;
+        $output = new class extends \EA_Output {
+            public int $statusCode = 200;
+
+            public function set_status_header($code = 200, $text = '')
+            {
+                $this->statusCode = (int) $code;
+
+                return parent::set_status_header($code, $text);
+            }
+        };
+        get_instance()->output = $output;
+        $output->set_output('');
+        $output->headers = [];
+        $message = 'bounded-search-input-' . bin2hex(random_bytes(8));
+        $log_path = $this->currentLogPath();
+        clearstatcache(true, $log_path);
+        $before = is_file($log_path) ? file_get_contents($log_path) : '';
+
+        try {
+            json_exception(new \BackofficeSearchInputException($message));
+
+            $response = json_decode($output->get_output(), true, 512, JSON_THROW_ON_ERROR);
+            clearstatcache(true, $log_path);
+            $after = is_file($log_path) ? file_get_contents($log_path) : '';
+
+            $this->assertSame(['success' => false, 'message' => 'Invalid search request.'], $response);
+            $this->assertSame(400, $output->statusCode);
+            $this->assertIsString($before);
+            $this->assertIsString($after);
+            $this->assertStringNotContainsString($message, $before);
+            $this->assertStringNotContainsString($message, $after);
+        } finally {
+            get_instance()->output = $originalOutput;
+        }
     }
 
     public function testNativeDatabaseExceptionHidesDiagnosticsAndKeepsProtectedLog(): void

@@ -7,6 +7,7 @@ use PHPUnit\Framework\TestCase;
 use Request_normalizer;
 
 require_once APPPATH . 'libraries/Request_normalizer.php';
+require_once APPPATH . 'helpers/http_helper.php';
 require_once APPPATH . 'libraries/Backoffice_request_dto_factory.php';
 
 class BackofficeRequestDtoFactoryTest extends TestCase
@@ -42,6 +43,42 @@ class BackofficeRequestDtoFactoryTest extends TestCase
         $this->assertSame(1000, $maximum_int->limit);
         $this->assertSame(1000, $custom_default->limit);
         $this->assertSame('name ASC', $custom_default->orderBy);
+    }
+
+    public function testCreateSearchRequestDtoAcceptsSearchBounds(): void
+    {
+        $dto = $this->factory->createSearchRequestDto(
+            str_repeat('k', 128),
+            implode(', ', ['first_name ASC', 'last_name DESC', 'email ASC', 'id DESC']),
+            20,
+            100000,
+        );
+
+        $this->assertSame(128, strlen($dto->keyword));
+        $this->assertSame('first_name ASC, last_name DESC, email ASC, id DESC', $dto->orderBy);
+        $this->assertSame(100000, $dto->offset);
+    }
+
+    public function testCreateSearchRequestDtoRejectsUnboundedSearchInputs(): void
+    {
+        $cases = [
+            'keyword' => [str_repeat('k', 129), 'update_datetime DESC', 20, 0],
+            'order length' => ['', str_repeat('x', 257), 20, 0],
+            'order terms' => ['', 'a ASC, b ASC, c ASC, d ASC, e ASC', 20, 0],
+            'order term length' => ['', str_repeat('x', 65), 20, 0],
+            'empty order term' => ['', ',,,', 20, 0],
+            'offset' => ['', 'update_datetime DESC', 20, 100001],
+        ];
+
+        foreach ($cases as $name => [$keyword, $orderBy, $limit, $offset]) {
+            try {
+                $this->factory->createSearchRequestDto($keyword, $orderBy, $limit, $offset);
+                $this->fail('Expected bounded search input to be rejected: ' . $name);
+            } catch (\InvalidArgumentException $exception) {
+                $this->assertInstanceOf(\BackofficeSearchInputException::class, $exception, $name);
+                $this->assertNotSame('', $exception->getMessage(), $name);
+            }
+        }
     }
 
     public function testCreateEntityPayloadRequestDtoSupportsAssocArrayAndJsonPayloads(): void
