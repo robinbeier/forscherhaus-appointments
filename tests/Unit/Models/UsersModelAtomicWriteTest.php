@@ -201,6 +201,21 @@ final class UsersModelAtomicWriteTest extends TestCase
         self::assertSame($before + 1, (int) $updated['credential_version']);
     }
 
+    public function test_username_change_bumps_credential_version_and_saved_version(): void
+    {
+        $userId = $this->usersModel->save($this->userData());
+        $this->createdUserIds[] = $userId;
+        $db = get_instance()->db;
+        $before = (int) $db->get_where('users', ['id' => $userId])->row('credential_version');
+        $stored = $this->usersModel->find($userId);
+        $stored['settings'] = ['username' => 'users-rename-' . bin2hex(random_bytes(4))];
+
+        $this->usersModel->save($stored);
+
+        self::assertSame($before + 1, (int) $db->get_where('users', ['id' => $userId])->row('credential_version'));
+        self::assertSame($before + 1, $this->usersModel->last_saved_credential_version());
+    }
+
     public function test_stale_credential_version_from_metadata_snapshot_cannot_overwrite_newer_value(): void
     {
         $userId = $this->usersModel->save($this->userData());

@@ -794,6 +794,36 @@ final class StaffSettingsApiHttpTest extends TestCase
         $this->assertNoSyntheticSecrets($adminCreate, $adminUpdate, $secretaryCreate, $updated);
     }
 
+    public function testBasicSelfUsernameRenameAdvancesVersionAndRotatesBasicCredential(): void
+    {
+        $admin = $this->basicClient($this->credentials['admin_username'], $this->credentials['password']);
+        $current = $this->success($admin->get('api/v1/admins/' . $this->fixture->actorId));
+        $newUsername = $this->fixture->run . '_basic_self_renamed';
+        $beforeVersion = (int) ($this->fixture->row('users', $this->fixture->actorId)['credential_version'] ?? 0);
+        $current['settings']['username'] = $newUsername;
+        unset($current['settings']['password'], $current['settings']['salt']);
+
+        $response = $admin->requestJsonApp(
+            'PUT',
+            'api/v1/admins/' . $this->fixture->actorId,
+            $current,
+        );
+
+        self::assertSame(200, $response->statusCode, $response->body);
+        $updated = $this->success($response);
+        self::assertSame($newUsername, $updated['settings']['username'] ?? null);
+        self::assertSame($newUsername, $this->fixture->userSettingsRow($this->fixture->actorId)['username']);
+        self::assertSame(
+            $beforeVersion + 1,
+            (int) ($this->fixture->row('users', $this->fixture->actorId)['credential_version'] ?? 0),
+            'A Basic self username rename must advance credential_version exactly once.',
+        );
+
+        self::assertSame(401, $admin->get('api/v1/admins/' . $this->fixture->actorId)->statusCode);
+        $renamed = $this->basicClient($newUsername, $this->credentials['password']);
+        self::assertSame(200, $renamed->get('api/v1/admins/' . $this->fixture->actorId)->statusCode);
+    }
+
     public function testAdminPasswordResetInvalidatesPreExistingTargetSession(): void
     {
         $admin = $this->writeClient('basic');

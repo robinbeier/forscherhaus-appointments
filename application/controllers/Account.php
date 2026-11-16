@@ -174,7 +174,7 @@ class Account extends EA_Controller
 
             $this->users_model->save($account, $new_password === null ? null : $current_password);
 
-            if ($new_password !== null) {
+            if ($new_password !== null || $this->users_model->last_saved_credential_version() !== null) {
                 $saved_version = $this->users_model->last_saved_credential_version();
                 if ($saved_version === null) {
                     throw new RuntimeException('Could not confirm the new credential version.');
@@ -211,12 +211,17 @@ class Account extends EA_Controller
     protected function hasCurrentAccountPermission(int $user_id): bool
     {
         $actor = $this->db
-            ->query('SELECT `id`, `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE', [
+            ->query('SELECT `id`, `id_roles`, `credential_version` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE', [
                 $user_id,
             ])
             ->row_array();
 
-        if (!$actor || (int) ($actor['id'] ?? 0) !== $user_id || empty($actor['id_roles'])) {
+        if (
+            !$actor ||
+            (int) ($actor['id'] ?? 0) !== $user_id ||
+            empty($actor['id_roles']) ||
+            (int) ($actor['credential_version'] ?? -1) !== (int) session('credential_version', 0)
+        ) {
             return false;
         }
 
