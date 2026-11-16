@@ -50,7 +50,11 @@ if [[ ! "$REL" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
   echo "[!] Release-ID muss 1-128 Zeichen lang sein, alphanumerisch beginnen und darf danach A-Z a-z 0-9 . _ - enthalten." >&2
   exit 1
 fi
-LOG="/tmp/build_ea_${REL}.log"
+LOG_DIR="$(mktemp -d "/tmp/build_ea_${REL}.XXXXXX")"
+chmod 0700 "$LOG_DIR"
+LOG="$LOG_DIR/build.log"
+(umask 077 && : > "$LOG")
+chmod 0600 "$LOG"
 exec > >(tee -a "$LOG") 2>&1
 
 run() {

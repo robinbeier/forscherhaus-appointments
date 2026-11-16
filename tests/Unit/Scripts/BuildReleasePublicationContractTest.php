@@ -22,6 +22,9 @@ final class BuildReleasePublicationContractTest extends TestCase
     {
         foreach ($this->temporaryReleaseIds as $release) {
             @unlink('/tmp/build_ea_' . $release . '.log');
+            foreach (glob('/tmp/build_ea_' . $release . '.??????') ?: [] as $logDirectory) {
+                $this->removeTree($logDirectory);
+            }
             foreach (glob('/tmp/' . $release . '.output.*') ?: [] as $outputDirectory) {
                 $this->removeTree($outputDirectory);
             }
@@ -39,6 +42,10 @@ final class BuildReleasePublicationContractTest extends TestCase
             './build_release.sh --expected-commit "$(git rev-parse HEAD)" --rel ea_20251005_2000',
             $script,
         );
+        self::assertStringContainsString('LOG_DIR="$(mktemp -d "/tmp/build_ea_${REL}.XXXXXX")"', $script);
+        self::assertStringContainsString('chmod 0700 "$LOG_DIR"', $script);
+        self::assertStringContainsString('(umask 077 && : > "$LOG")', $script);
+        self::assertStringContainsString('chmod 0600 "$LOG"', $script);
         self::assertStringContainsString('ARCHIVE_TEMP=".${REL}.tar.gz.upload-${REMOTE_NONCE}"', $publisher);
         self::assertStringContainsString('OUTPUT="$(cd "$OUTPUT" && pwd -P)"', $script);
         self::assertStringContainsString('STAGE="$(cd "$STAGE" && pwd -P)"', $script);
@@ -280,11 +287,55 @@ final class BuildReleasePublicationContractTest extends TestCase
                 ' --skip-upload',
             $exitCode,
         );
-        $output = (string) file_get_contents('/tmp/build_ea_' . $release . '.log');
+        $output = $this->readBuildLog($release);
 
         self::assertSame(1, $exitCode);
         self::assertStringContainsString('Tracked source is dirty', $output);
         self::assertFileDoesNotExist($marker);
+    }
+
+    public function testLegacyPredictableLogPathsCannotRedirectBuildOutput(): void
+    {
+        foreach (['symlink', 'fifo'] as $kind) {
+            $project = $this->workspace . '/legacy-log-' . $kind;
+            $release = 'ea_20261113_log_' . $kind . '_' . bin2hex(random_bytes(4));
+            $this->temporaryReleaseIds[] = $release;
+            $legacyPath = '/tmp/build_ea_' . $release . '.log';
+            $sentinel = $this->workspace . '/legacy-' . $kind . '-sentinel';
+            try {
+                self::assertTrue(mkdir($project . '/scripts/release-gate/lib', 0700, true));
+                self::assertTrue(mkdir($project . '/application/config', 0700, true));
+                $this->copyBuildScriptForHarness($project . '/build_release.sh');
+                self::assertNotFalse(file_put_contents($project . '/application/config/config.php', '<?php'));
+                $this->initializeGitFixture($project, 'build_release.sh application scripts');
+                $commit = trim($this->runCommandOutput('git -C ' . escapeshellarg($project) . ' rev-parse HEAD'));
+                self::assertNotFalse(file_put_contents($project . '/build_release.sh', "\n# dirty fixture\n", FILE_APPEND));
+                self::assertNotFalse(file_put_contents($sentinel, 'untouched'));
+                if ($kind === 'symlink') {
+                    self::assertTrue(symlink($sentinel, $legacyPath));
+                } else {
+                    self::assertSame(0, $this->runCommand('mkfifo ' . escapeshellarg($legacyPath)));
+                }
+
+                $exitCode = 0;
+                $this->runCommand(
+                    'bash ' . escapeshellarg($project . '/build_release.sh') .
+                        ' --expected-commit ' . escapeshellarg($commit) .
+                        ' --rel ' . escapeshellarg($release) .
+                        ' --project ' . escapeshellarg($project) . ' --skip-upload',
+                    $exitCode,
+                );
+
+                self::assertSame(1, $exitCode, $kind . ' fixture unexpectedly changed build result.');
+                self::assertSame('untouched', file_get_contents($sentinel));
+                $log = $this->readBuildLog($release);
+                self::assertStringContainsString('Tracked source is dirty', $log);
+            } finally {
+                if (is_link($legacyPath) || file_exists($legacyPath)) {
+                    unlink($legacyPath);
+                }
+            }
+        }
     }
 
     public function testStagingPruneRemovesDocumentationAndKeepsRuntimeFiles(): void
@@ -378,7 +429,7 @@ final class BuildReleasePublicationContractTest extends TestCase
                 ' --skip-upload',
             $exitCode,
         );
-        $output = (string) file_get_contents('/tmp/build_ea_' . $release . '.log');
+        $output = $this->readBuildLog($release);
         self::assertSame(0, $exitCode, $output);
         self::assertStringContainsString('[✓] Build abgeschlossen:', $output);
         preg_match('/\[✓\] Build abgeschlossen: (.+)$/m', $output, $matches);
@@ -395,7 +446,9 @@ final class BuildReleasePublicationContractTest extends TestCase
             @unlink(trim($provenanceMatches[1]));
         }
         @rmdir(dirname($archive));
-        @unlink('/tmp/build_ea_' . $release . '.log');
+        foreach (glob('/tmp/build_ea_' . $release . '.??????') ?: [] as $logDirectory) {
+            $this->removeTree($logDirectory);
+        }
     }
 
     public function testReleaseBuildStopsBeforeArchiveWhenNpmCiFails(): void
@@ -443,7 +496,7 @@ final class BuildReleasePublicationContractTest extends TestCase
                 ' --skip-upload',
             $exitCode,
         );
-        $output = (string) file_get_contents('/tmp/build_ea_' . $release . '.log');
+        $output = $this->readBuildLog($release);
         self::assertSame(42, $exitCode);
         self::assertStringContainsString('synthetic npm ci failure', $output);
         self::assertStringNotContainsString('[✓] Build abgeschlossen:', $output);
@@ -452,7 +505,9 @@ final class BuildReleasePublicationContractTest extends TestCase
             self::assertSame([], glob($outputDirectory . '/*.build-provenance.json') ?: []);
             rmdir($outputDirectory);
         }
-        @unlink('/tmp/build_ea_' . $release . '.log');
+        foreach (glob('/tmp/build_ea_' . $release . '.*') ?: [] as $logDirectory) {
+            $this->removeTree($logDirectory);
+        }
     }
 
     private function writeExecutable(string $path, string $contents): void
@@ -465,11 +520,11 @@ final class BuildReleasePublicationContractTest extends TestCase
     {
         $script = file_get_contents(dirname(__DIR__, 3) . '/build_release.sh');
         self::assertIsString($script);
-        $script = str_replace('exec > >(tee -a "$LOG") 2>&1', 'exec >"$LOG" 2>&1', $script);
+        $script = str_replace('exec > >(tee -a "$LOG") 2>&1', 'exec >>"$LOG" 2>&1', $script);
         self::assertNotFalse(file_put_contents($target, $script));
         $helper = dirname(__DIR__, 3) . '/scripts/release-gate/lib/create_release_archive.sh';
         $helperTarget = dirname($target) . '/scripts/release-gate/lib/create_release_archive.sh';
-        self::assertTrue(mkdir(dirname($helperTarget), 0700, true));
+        self::assertTrue(is_dir(dirname($helperTarget)) || mkdir(dirname($helperTarget), 0700, true));
         self::assertNotFalse(copy($helper, $helperTarget));
     }
 
@@ -483,6 +538,20 @@ final class BuildReleasePublicationContractTest extends TestCase
         self::assertSame(0, $this->runCommand('git -C ' . escapeshellarg($project) . ' config user.name Test'));
         self::assertSame(0, $this->runCommand('git -C ' . escapeshellarg($project) . ' add ' . $paths));
         self::assertSame(0, $this->runCommand('git -C ' . escapeshellarg($project) . ' commit -qm initial'));
+    }
+
+    private function readBuildLog(string $release): string
+    {
+        $directories = array_values(array_filter(
+            glob('/tmp/build_ea_' . $release . '.*') ?: [],
+            static fn(string $path): bool => is_dir($path) && !is_link($path),
+        ));
+        self::assertCount(1, $directories, 'Expected one private build-log directory.');
+        $logPath = $directories[0] . '/build.log';
+        self::assertFileExists($logPath);
+        self::assertSame(0700, fileperms($directories[0]) & 0777);
+        self::assertSame(0600, fileperms($logPath) & 0777);
+        return (string) file_get_contents($logPath);
     }
 
     private function runCommand(string $command, ?int &$exitCode = null): int

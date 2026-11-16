@@ -39,10 +39,12 @@ FOREIGN_MARKERS = (
     Path('/var/lib/fh-defense-ordinary/sessions.json'),
     Path('/var/lib/fh-defense-ordinary/sessions.json.tmp'),
 )
-OLD_SHA256 = 'eb73e226c6c09f4f22945b463073e8cc56b3d1e0e15239825933abb7f9264c65'
-OLD_SIZE = 102483
-NEW_SHA256 = 'f1fe428f50a7b2a94eff4ef82243e8e6f58904eaeca8749826d91e1a9fa83aa8'
-NEW_SIZE = 104901
+OLD_SHA256 = 'f1fe428f50a7b2a94eff4ef82243e8e6f58904eaeca8749826d91e1a9fa83aa8'
+OLD_SIZE = 104901
+NEW_SHA256 = 'e07246f1b10bcc522f1b80bccec91a67fc14a8082279ba2d5c31f8c22909fff9'
+NEW_SIZE = 107128
+
+TRANSACTION_SCHEMA = 'helper_sync.current.v2'
 
 class SyncError(RuntimeError): pass
 
@@ -182,6 +184,7 @@ def recover_pending() -> None:
     run_id = state.get('run_id')
     if not isinstance(run_id, str) or not re.fullmatch(r'[0-9a-f]{32}', run_id) or state.get('tx') != str(TX_ROOT / run_id):
         raise SyncError('pending_state_invalid')
+    ensure_transaction_identity(TX_ROOT / run_id, run_id)
     backup = Path(state.get('backup', ''))
     if backup != TX_ROOT / run_id / 'old-helper' or backup.is_symlink() or not backup.is_file():
         raise SyncError('rollback_source_missing')
@@ -265,12 +268,26 @@ def transaction_path(run_id: str) -> Path:
     if not re.fullmatch(r'[0-9a-f]{32}', run_id): raise SyncError('run_id_invalid')
     return TX_ROOT / run_id
 
+def ensure_transaction_identity(tx: Path, run_id: str) -> None:
+    marker = tx / 'transaction.json'
+    if not marker.exists() and not marker.is_symlink():
+        raise SyncError('transaction_identity_missing')
+    if marker.is_symlink() or not marker.is_file():
+        raise SyncError('transaction_identity_invalid')
+    try:
+        value = json.loads(marker.read_text(encoding='utf-8'))
+    except Exception as exc:
+        raise SyncError('transaction_identity_invalid') from exc
+    if value != {'schema': TRANSACTION_SCHEMA, 'run_id': run_id}:
+        raise SyncError('transaction_identity_invalid')
+
 def validate_pending_state(state: dict, run_id: str) -> tuple[Path, Path, dict, dict]:
     if state.get('schema') != 'helper_sync.v1' or state.get('target') != str(TARGET) or state.get('run_id') != run_id:
         raise SyncError('pending_state_invalid')
     tx = transaction_path(run_id)
     if state.get('tx') != str(tx): raise SyncError('pending_state_invalid')
     trusted_dir(tx)
+    ensure_transaction_identity(tx, run_id)
     backup = tx / 'old-helper'
     if state.get('backup') != str(backup) or backup.is_symlink() or not backup.is_file():
         raise SyncError('rollback_source_missing')
@@ -304,6 +321,7 @@ def validate_old_target(old: dict) -> dict:
 def validate_terminal_rollback(tx: Path, run_id: str) -> None:
     if tx.is_symlink() or not tx.is_dir(): raise SyncError('rollback_transaction_missing')
     trusted_dir(tx)
+    ensure_transaction_identity(tx, run_id)
     if any((tx / name).exists() or (tx / name).is_symlink() for name in ('acknowledged.json', 'aborted-before-replace.json')):
         raise SyncError('rollback_receipt_conflict')
     backup = tx / 'old-helper'
@@ -335,7 +353,8 @@ def inspect_ack(run_id: str) -> dict:
             raise SyncError('pending_missing')
         state = json.loads(PENDING.read_text(encoding='utf-8'))
         if state.get('run_id') != run_id: raise SyncError('run_id_mismatch')
-        receipt_path = Path(state['tx']) / 'committed.json'
+        tx, _backup, _old, _new = validate_pending_state(state, run_id)
+        receipt_path = tx / 'committed.json'
         if (Path(state['tx']) / 'rollback-started.json').exists() or (Path(state['tx']) / 'rollback-started.json').is_symlink():
             raise SyncError('rollback_in_progress')
         receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
@@ -417,7 +436,11 @@ def execute(candidate_sha: str, candidate_size: int, run_id: str) -> dict:
         # Caller-supplied ID is correlation only; authorization remains bound
         # to hashes, lock identity, and the checks above.
         tx = transaction_path(run_id)
-        tx.mkdir(mode=0o700); os.chown(tx, 0, 0); fsync_dir(TX_ROOT)
+        if tx.exists() or tx.is_symlink():
+            raise SyncError('transaction_exists')
+        tx.mkdir(mode=0o700); os.chown(tx, 0, 0)
+        write_json(tx / 'transaction.json', {'schema': TRANSACTION_SCHEMA, 'run_id': run_id})
+        fsync_dir(TX_ROOT)
         backup, staged = tx / 'old-helper', tx / 'new-helper'
         copy_new(TARGET, backup, old['mode']); copy_new(CANDIDATE, staged, cand['mode'])
         if ident(backup)['sha256'] != old['sha256'] or ident(backup)['size'] != old['size'] or ident(backup)['mode'] != old['mode']:

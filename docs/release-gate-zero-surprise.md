@@ -365,20 +365,24 @@ hard failure.
 
 Predeploy reports:
 
-- `storage/logs/release-gate/zero-surprise-<UTC>.json`
-- deploy default override: `storage/logs/release-gate/zero-surprise-predeploy-<REL>-<UTC>.json`
-- `storage/logs/release-gate/zero-surprise-booking-initial-<UTC>.json`
-- `storage/logs/release-gate/zero-surprise-booking-hypothetical-unblocked-<UTC>.json` (only
+- `.release-gate/zero-surprise-<UTC>.json`
+- deploy default override: `.release-gate/zero-surprise-predeploy-<REL>-<UTC>.json`
+- `.release-gate/zero-surprise-booking-initial-<UTC>.json`
+- `.release-gate/zero-surprise-booking-hypothetical-unblocked-<UTC>.json` (only
   when the exact isolated no-slot path is selected)
-- `storage/logs/release-gate/zero-surprise-dashboard-<UTC>.json`
+- `.release-gate/zero-surprise-dashboard-<UTC>.json`
 
 Postdeploy canary reports:
 
-- `storage/logs/release-gate/zero-surprise-live-canary-<UTC>.json`
-- deploy default override: `storage/logs/release-gate/zero-surprise-live-canary-<REL>-<UTC>.json`
-- `storage/logs/release-gate/zero-surprise-live-canary-booking-discovery-<UTC>.json`
-- `storage/logs/release-gate/zero-surprise-live-canary-booking-<UTC>.json`
-- `storage/logs/release-gate/zero-surprise-live-canary-dashboard-<UTC>.json`
+- `.release-gate/zero-surprise-live-canary-<UTC>.json`
+- deploy default override: `.release-gate/zero-surprise-live-canary-<REL>-<UTC>.json`
+- `.release-gate/zero-surprise-live-canary-booking-discovery-<UTC>.json`
+- `.release-gate/zero-surprise-live-canary-booking-<UTC>.json`
+- `.release-gate/zero-surprise-live-canary-dashboard-<UTC>.json`
+
+These deployment and child reports are written below the root-owned `0700`
+`.release-gate` directory. Report files are created exclusively with mode
+`0600`; a pre-existing symlink, FIFO, or regular file is rejected.
 
 ## Exit codes
 

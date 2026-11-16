@@ -100,6 +100,71 @@ class HelperSyncV1Test(unittest.TestCase):
             self.assertEqual(health.call_count, 2)
 
     @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_interrupted_pending_recovery_requires_exact_transaction_marker(self):
+        run_id = '7' * 32
+        with patch.object(mod, 'internal_postflight', side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, run_id)
+
+        marker = self.tx / run_id / 'transaction.json'
+        self.assertEqual(
+            {'schema': mod.TRANSACTION_SCHEMA, 'run_id': run_id},
+            json.loads(marker.read_text()),
+        )
+        marker.unlink()
+        with self.assertRaisesRegex(mod.SyncError, 'transaction_identity_missing'):
+            mod.recover_pending()
+        self.assertTrue(mod.PENDING.exists())
+        self.assertEqual(self.target.read_text(), 'new\n')
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_pending_marker_matrix_fails_closed_for_recovery_ack_and_rollback(self):
+        cases = {
+            'missing': lambda marker, run_id: marker.unlink(),
+            'wrong-schema': lambda marker, run_id: marker.write_text(
+                '{"schema":"helper_sync.v1","run_id":"' + run_id + '"}\n',
+            ),
+            'wrong-run-id': lambda marker, run_id: marker.write_text(
+                '{"schema":"' + mod.TRANSACTION_SCHEMA + '","run_id":"' + 'b' * 32 + '"}\n',
+            ),
+            'symlink': lambda marker, run_id: (marker.unlink(), marker.symlink_to(self.target)),
+            'non-file': lambda marker, run_id: (marker.unlink(), marker.mkdir()),
+        }
+        for run_char, (name, mutate) in zip('12345', cases.items()):
+            with self.subTest(name=name):
+                run_id = run_char * 32
+                with patch.object(mod, 'internal_postflight', side_effect=KeyboardInterrupt):
+                    with self.assertRaises(KeyboardInterrupt):
+                        mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, run_id)
+                marker = self.tx / run_id / 'transaction.json'
+                mutate(marker, run_id)
+                expected = 'transaction_identity_missing' if name == 'missing' else 'transaction_identity_invalid'
+                for operation in (
+                    lambda: mod.recover_pending(),
+                    lambda: mod.inspect_ack(run_id),
+                    lambda: mod.rollback_run(run_id),
+                ):
+                    with self.assertRaisesRegex(mod.SyncError, expected):
+                        operation()
+                self.assertTrue(mod.PENDING.exists())
+                self.assertEqual(self.target.read_text(), 'new\n')
+                mod.PENDING.unlink()
+                self.target.write_text('old\n')
+                os.chmod(self.target, 0o700)
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
+    def test_terminal_rollback_requires_transaction_marker(self):
+        run_id = '6' * 32
+        with patch.object(mod, 'internal_postflight', return_value=None):
+            mod.execute(mod.sha256(self.candidate), self.candidate.stat().st_size, run_id)
+            self.assertEqual(mod.rollback_run(run_id)['status'], 'rolled_back')
+        marker = self.tx / run_id / 'transaction.json'
+        marker.unlink()
+        with self.assertRaisesRegex(mod.SyncError, 'transaction_identity_missing'):
+            mod.rollback_run(run_id)
+        self.assertEqual(self.target.read_text(), 'old\n')
+
+    @unittest.skipUnless(os.geteuid() == 0, 'requires root-owned fixture')
     def test_execute_then_explicit_rollback_is_run_bound_and_idempotent(self):
         run_id = '8' * 32
         with patch.object(mod, 'internal_postflight', return_value=None):

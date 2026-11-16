@@ -32,6 +32,9 @@ PASSWORD="${KUMA_PDF_EXPORT_PASSWORD:-${PASSWORD:-}}"
 GATE_OUTPUT_DIR="$(kuma_push_prepare_private_directory "$GATE_OUTPUT_DIR")"
 GATE_OUTPUT_FILE="${GATE_OUTPUT_DIR}/kuma-pdf-export-latest.json"
 kuma_push_validate_private_file "$GATE_OUTPUT_FILE"
+RUN_OUTPUT_DIR="$(mktemp -d "$GATE_OUTPUT_DIR/.run.XXXXXXXX")"
+chmod 0700 "$RUN_OUTPUT_DIR"
+RUN_OUTPUT_FILE="${RUN_OUTPUT_DIR}/report.json"
 
 # Use the latest completed Monday-Friday range, including on weekends.
 weekday="$(date -u +%u)"
@@ -42,7 +45,8 @@ stdout_file="$(mktemp)"
 stderr_file="$(mktemp)"
 
 cleanup() {
-  rm -f "$stdout_file" "$stderr_file"
+  rm -f "$stdout_file" "$stderr_file" "$RUN_OUTPUT_FILE"
+  rmdir "$RUN_OUTPUT_DIR" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -59,17 +63,37 @@ printf '%s' "$PASSWORD" | RELEASE_GATE_REPO_ROOT="$APP_ROOT" php "$GATE_SCRIPT" 
   --export-timeout="$EXPORT_TIMEOUT" \
   --max-pdf-duration-ms="$MAX_PDF_DURATION_MS" \
   --require-nonempty-metrics="$REQUIRE_NONEMPTY_METRICS" \
-  --output-json="$GATE_OUTPUT_FILE" \
+  --output-json="$RUN_OUTPUT_FILE" \
   >"$stdout_file" 2>"$stderr_file"
 gate_rc=$?
 set -e
 
-if [[ ! -f "$GATE_OUTPUT_FILE" ]]; then
+if [[ ! -f "$RUN_OUTPUT_FILE" ]]; then
   msg="CRIT dashboard gate did not write report"
   kuma_push_send "$KUMA_PUSH_URL_PDF_EXPORT" "down" "$msg" "0"
   kuma_push_log "$msg"
   exit 0
 fi
+
+kuma_push_validate_private_file "$RUN_OUTPUT_FILE" || {
+  msg="CRIT dashboard gate wrote an unsafe report"
+  kuma_push_send "$KUMA_PUSH_URL_PDF_EXPORT" "down" "$msg" "0"
+  kuma_push_log "$msg"
+  exit 0
+}
+
+if ! mv -f -- "$RUN_OUTPUT_FILE" "$GATE_OUTPUT_FILE"; then
+  msg="CRIT dashboard gate could not publish latest report"
+  kuma_push_send "$KUMA_PUSH_URL_PDF_EXPORT" "down" "$msg" "0"
+  kuma_push_log "$msg"
+  exit 0
+fi
+kuma_push_validate_private_file "$GATE_OUTPUT_FILE" || {
+  msg="CRIT dashboard gate published an unsafe latest report"
+  kuma_push_send "$KUMA_PUSH_URL_PDF_EXPORT" "down" "$msg" "0"
+  kuma_push_log "$msg"
+  exit 0
+}
 
 summary="$(
   php -r '

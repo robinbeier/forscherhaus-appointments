@@ -105,11 +105,13 @@ The builder:
   release files
 
 Local release archives and provenance sidecars are written below the randomized
-`/tmp/<REL>.output.XXXXXX/` directory and include the staged application config.
-Treat that output directory and `/tmp/build_ea_<REL>.log` as sensitive operator
+`/tmp/<REL>.output.XXXXXX/` directory and the private
+`/tmp/build_ea_<REL>.XXXXXX/build.log` file. Treat both as sensitive operator
 artifacts: do not commit, attach, or paste their contents, and remove them after
 recording validation evidence unless they are intentionally retained for a
-follow-up rehearsal.
+follow-up rehearsal. The log parent is created with mode `0700` and the log with
+mode `0600`; its randomized suffix prevents preplaced `/tmp` symlinks or FIFOs
+from redirecting build output.
 
 ## Production database migrations
 

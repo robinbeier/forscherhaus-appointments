@@ -60,7 +60,7 @@ printf %s "$EA_GATE_PASSWORD" | composer release:gate:dashboard -- \
 - `--max-pdf-duration-ms` (optional): Maximum allowed duration per PDF export request, default `30000`.
 - `--require-nonempty-metrics` (optional flag/bool): Fail if metrics payload is empty.
 - `--output-json` (optional): Report path. Default:
-  - `storage/logs/release-gate/dashboard-gate-<UTC>.json`
+  - `.release-gate/dashboard-gate-<UTC>.json` (root-owned deployment evidence)
 
 ## Exit Codes
 

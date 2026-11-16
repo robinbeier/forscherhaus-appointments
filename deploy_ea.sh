@@ -1052,19 +1052,24 @@ normalize_stage_permissions() {
 apply_stage_permission_policy() {
   local storage_root="${STAGE_ROOT}/storage"
   local sessions_root="${storage_root}/sessions"
+  local evidence_root="${STAGE_ROOT}/.release-gate"
+
+  # Zero-surprise evidence is root-only operational state.  It must survive
+  # the code permission pass unchanged after stage ownership normalization.
+  run_shell "if [[ -e '$evidence_root' ]]; then [[ -d '$evidence_root' && ! -L '$evidence_root' ]] || { echo '[!] Zero-surprise evidence directory is unsafe.' >&2; exit 1; }; identity=\$(stat -c '%u:%g:%a' -- '$evidence_root') || exit 1; [[ \"\$identity\" == 0:0:700 ]] || { echo '[!] Zero-surprise evidence directory ownership or mode is unsafe.' >&2; exit 1; }; fi" || return $?
 
   # Code is never made trustworthy by merely skipping an unsafe entry.  Fail
   # closed if an extracted code tree contains links or hardlinked regular
   # files; otherwise a web-owned executable could survive this pass.
-  run_shell "unsafe=\$(find -P '$STAGE_ROOT' -path '$storage_root' -prune -o -path '${STAGE_ROOT}/config.php' -prune -o \( -type l -o -type f -links +1 \) -print -quit); [[ -z \"\$unsafe\" ]] || { echo '[!] Release code contains an unsafe link or hardlink.' >&2; exit 1; }" || return $?
+  run_shell "unsafe=\$(find -P '$STAGE_ROOT' -path '$storage_root' -prune -o -path '$evidence_root' -prune -o -path '${STAGE_ROOT}/config.php' -prune -o \( -type l -o -type f -links +1 \) -print -quit); [[ -z \"\$unsafe\" ]] || { echo '[!] Release code contains an unsafe link or hardlink.' >&2; exit 1; }" || return $?
 
   # Release code is root-controlled.  -P keeps symlinks and their targets out
   # of the metadata pass; the artifact validator separately rejects unsafe
   # release links.  Runtime storage is handled below with its own boundary.
-  run_shell "find -P '$STAGE_ROOT' -path '$storage_root' -prune -o -path '${STAGE_ROOT}/config.php' -prune -o -type d -exec chown 0:0 {} +" || return $?
-  run_shell "find -P '$STAGE_ROOT' -path '$storage_root' -prune -o -path '${STAGE_ROOT}/config.php' -prune -o -type d -exec chmod 755 {} +" || return $?
-  run_shell "find -P '$STAGE_ROOT' -path '$storage_root' -prune -o -path '${STAGE_ROOT}/config.php' -prune -o -type f -links 1 -exec chown 0:0 {} +" || return $?
-  run_shell "find -P '$STAGE_ROOT' -path '$storage_root' -prune -o -path '${STAGE_ROOT}/config.php' -prune -o -type f -links 1 -exec chmod 644 {} +" || return $?
+  run_shell "find -P '$STAGE_ROOT' -path '$storage_root' -prune -o -path '$evidence_root' -prune -o -path '${STAGE_ROOT}/config.php' -prune -o -type d -exec chown 0:0 {} +" || return $?
+  run_shell "find -P '$STAGE_ROOT' -path '$storage_root' -prune -o -path '$evidence_root' -prune -o -path '${STAGE_ROOT}/config.php' -prune -o -type d -exec chmod 755 {} +" || return $?
+  run_shell "find -P '$STAGE_ROOT' -path '$storage_root' -prune -o -path '$evidence_root' -prune -o -path '${STAGE_ROOT}/config.php' -prune -o -type f -links 1 -exec chown 0:0 {} +" || return $?
+  run_shell "find -P '$STAGE_ROOT' -path '$storage_root' -prune -o -path '$evidence_root' -prune -o -path '${STAGE_ROOT}/config.php' -prune -o -type f -links 1 -exec chmod 644 {} +" || return $?
 
   # The application owns writable runtime directories.  Session files are
   # deliberately excluded: their private owner, mode, hardlinks and symlinks
@@ -2110,17 +2115,32 @@ prepare_zero_surprise_stage_runtime() {
   local stage_config
   local stage_sample
   local base_url
+  local evidence_root
 
   stage_config="$STAGE_ROOT/config.php"
   stage_sample="$STAGE_ROOT/config-sample.php"
 
-  if [[ "$REQUIRE_ZERO_SURPRISE" -ne 1 ]]; then
+  if [[ "$REQUIRE_ZERO_SURPRISE" -ne 1 && "$ZERO_SURPRISE_CANARY_ENABLED" -ne 1 ]]; then
     return 0
   fi
 
   if [[ "$DRYRUN" -eq 1 ]]; then
     echo "[DRY-RUN] would generate zero-surprise stage config from '$stage_sample' -> '$stage_config'"
     echo "[DRY-RUN] would prepare the stage's PHP-FPM runtime storage directories"
+    if [[ "$REQUIRE_ZERO_SURPRISE" -ne 1 ]]; then
+      echo "[DRY-RUN] would prepare root-owned private canary evidence directory '$STAGE_ROOT/.release-gate'"
+    fi
+    return 0
+  fi
+
+  evidence_root="$STAGE_ROOT/.release-gate"
+  if [[ "$REQUIRE_ZERO_SURPRISE" -ne 1 ]]; then
+    [[ ! -L "$evidence_root" ]] || return 1
+    [[ ! -e "$evidence_root" || -d "$evidence_root" ]] || return 1
+    mkdir -p "$evidence_root" >/dev/null 2>&1 || return $?
+    chown 0:0 "$evidence_root" >/dev/null 2>&1 || return $?
+    chmod 0700 "$evidence_root" >/dev/null 2>&1 || return $?
+    [[ "$(stat -c '%u:%g:%a' -- "$evidence_root" 2>/dev/null)" == 0:0:700 ]] || return 1
     return 0
   fi
 
@@ -2141,9 +2161,17 @@ prepare_zero_surprise_stage_runtime() {
   base_url="$(read_zero_surprise_predeploy_base_url)" \
     || return $?
 
+  evidence_root="$STAGE_ROOT/.release-gate"
+  [[ ! -L "$evidence_root" ]] || return 1
+  [[ ! -e "$evidence_root" || -d "$evidence_root" ]] || return 1
+
   cp "$stage_sample" "$stage_config" >/dev/null 2>&1 || return $?
   mkdir -p "$STAGE_ROOT/storage/backups" "$STAGE_ROOT/storage/cache" \
-    "$STAGE_ROOT/storage/logs/release-gate" "$STAGE_ROOT/storage/uploads" >/dev/null 2>&1 || return $?
+    "$STAGE_ROOT/storage/logs/release-gate" "$STAGE_ROOT/storage/uploads" \
+    "$evidence_root" >/dev/null 2>&1 || return $?
+  chown 0:0 "$evidence_root" >/dev/null 2>&1 || return $?
+  chmod 0700 "$evidence_root" >/dev/null 2>&1 || return $?
+  [[ "$(stat -c '%u:%g:%a' -- "$evidence_root" 2>/dev/null)" == 0:0:700 ]] || return 1
 
   php "$STAGE_ROOT/scripts/release-gate/prepare_zero_surprise_stage_config.php" \
     --config="$stage_config" \
@@ -2196,7 +2224,7 @@ run_zero_surprise_predeploy_replay() {
     return 0
   fi
 
-  ZERO_SURPRISE_REPORT="${ZERO_SURPRISE_REPORT:-$STAGE_ROOT/storage/logs/release-gate/zero-surprise-predeploy-${REL}-$(date -u +%Y%m%dT%H%M%SZ).json}"
+  ZERO_SURPRISE_REPORT="${ZERO_SURPRISE_REPORT:-$STAGE_ROOT/.release-gate/zero-surprise-predeploy-${REL}-$(date -u +%Y%m%dT%H%M%SZ).json}"
 
   if [[ "$DRYRUN" -eq 1 ]]; then
     echo "[DRY-RUN] run zero-surprise predeploy replay from '$STAGE_ROOT' with dump '$ZERO_SURPRISE_DUMP_FILE', credentials '$ZERO_SURPRISE_PREDEPLOY_CREDENTIALS_FILE', profile '$ZERO_SURPRISE_PROFILE', report '$ZERO_SURPRISE_REPORT'"
@@ -2320,7 +2348,15 @@ run_zero_surprise_live_canary() {
     return 1
   }
 
-  ZERO_SURPRISE_CANARY_REPORT="$APP/storage/logs/release-gate/zero-surprise-live-canary-${REL}-$(date -u +%Y%m%dT%H%M%SZ).json"
+  [[ -d "$APP/.release-gate" && ! -L "$APP/.release-gate" ]] || {
+    echo "[!] Root-owned zero-surprise evidence directory is missing or unsafe: $APP/.release-gate" >&2
+    return 1
+  }
+  [[ "$(stat -c '%u:%g:%a' -- "$APP/.release-gate" 2>/dev/null)" == 0:0:700 ]] || {
+    echo "[!] Root-owned zero-surprise evidence directory has unsafe ownership or mode: $APP/.release-gate" >&2
+    return 1
+  }
+  ZERO_SURPRISE_CANARY_REPORT="$APP/.release-gate/zero-surprise-live-canary-${REL}-$(date -u +%Y%m%dT%H%M%SZ).json"
 
   echo "[i] Running zero-surprise post-deploy canary"
   echo "    Credentials file : $ZERO_SURPRISE_CANARY_CREDENTIALS_FILE"

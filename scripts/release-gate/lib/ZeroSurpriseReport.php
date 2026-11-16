@@ -186,7 +186,7 @@ final class ZeroSurpriseReport
         $report = $this->toArray();
         $directory = dirname($this->outputPath);
 
-        if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
+        if (!is_dir($directory) && !mkdir($directory, 0700, true) && !is_dir($directory)) {
             throw new RuntimeException('Could not create report directory: ' . $directory);
         }
 
@@ -195,8 +195,20 @@ final class ZeroSurpriseReport
             throw new RuntimeException('Could not encode zero-surprise report as JSON.');
         }
 
-        if (file_put_contents($this->outputPath, $encoded . PHP_EOL) === false) {
-            throw new RuntimeException('Could not write zero-surprise report to: ' . $this->outputPath);
+        // Reports are evidence written by the privileged deployment process.
+        // O_EXCL semantics prevent an attacker from pre-placing a symlink (or
+        // other file) at the final pathname and redirecting the write.
+        $handle = @fopen($this->outputPath, 'x');
+        if ($handle === false) {
+            throw new RuntimeException('Could not create zero-surprise report without following an existing path: ' . $this->outputPath);
+        }
+
+        $written = fwrite($handle, $encoded . PHP_EOL);
+        $flushed = $written !== false && fflush($handle);
+        fclose($handle);
+        if (!$flushed || $written !== strlen($encoded . PHP_EOL) || !@chmod($this->outputPath, 0600)) {
+            @unlink($this->outputPath);
+            throw new RuntimeException('Could not write zero-surprise report: ' . $this->outputPath);
         }
 
         return $this->outputPath;

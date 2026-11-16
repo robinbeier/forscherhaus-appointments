@@ -18,7 +18,7 @@ const ZERO_SURPRISE_CANARY_EXIT_RUNTIME_ERROR = 2;
 
 $repoRoot = dirname(__DIR__, 2);
 $timestamp = gmdate('Ymd\\THis\\Z');
-$defaultOutputPath = $repoRoot . '/storage/logs/release-gate/zero-surprise-live-canary-' . $timestamp . '.json';
+$defaultOutputPath = $repoRoot . '/.release-gate/zero-surprise-live-canary-' . $timestamp . '.json';
 $defaultProfile = 'school-day-default';
 
 $report = null;
@@ -36,11 +36,11 @@ try {
 
     $credentials = ZeroSurpriseCredentials::resolve($config['credentials_file'], $config['profile_name']);
 
-    $bookingReportPath = 'storage/logs/release-gate/zero-surprise-live-canary-booking-' . $timestamp . '.json';
+    $bookingReportPath = '.release-gate/zero-surprise-live-canary-booking-' . $timestamp . '.json';
     $bookingDiscoveryReportPath =
-        'storage/logs/release-gate/zero-surprise-live-canary-booking-discovery-' . $timestamp . '.json';
+        '.release-gate/zero-surprise-live-canary-booking-discovery-' . $timestamp . '.json';
     $bookingDiscoverySlotPath = ZeroSurpriseCanaryContext::SLOT_PATH;
-    $dashboardReportPath = 'storage/logs/release-gate/zero-surprise-live-canary-dashboard-' . $timestamp . '.json';
+    $dashboardReportPath = '.release-gate/zero-surprise-live-canary-dashboard-' . $timestamp . '.json';
 
     $report = new ZeroSurpriseReport(
         $config['release_id'],

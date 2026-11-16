@@ -11,11 +11,13 @@ require_once dirname(__DIR__, 2) . '/vendor/autoload.php';
 require_once __DIR__ . '/../release-gate/lib/GateAssertions.php';
 require_once __DIR__ . '/../release-gate/lib/GateHttpClient.php';
 require_once __DIR__ . '/../release-gate/lib/GateCliSupport.php';
+require_once __DIR__ . '/../release-gate/lib/SafeJsonReport.php';
 require_once __DIR__ . '/lib/OpenApiContractValidator.php';
 require_once __DIR__ . '/lib/CheckSelection.php';
 require_once __DIR__ . '/lib/BookedSlotMatcher.php';
 require_once __DIR__ . '/lib/BookingWriteContractState.php';
 require_once __DIR__ . '/lib/BookingWriteReportSanitizer.php';
+require_once __DIR__ . '/lib/BookingWriteReportFailure.php';
 require_once __DIR__ . '/lib/DeterministicFixtureFactory.php';
 require_once __DIR__ . '/lib/BookingEmailFieldPolicy.php';
 require_once __DIR__ . '/lib/CanarySlotSearchPolicy.php';
@@ -26,6 +28,7 @@ use CiContract\BookedSlotMatcher;
 use CiContract\BookingEmailFieldPolicy;
 use CiContract\BookingWriteContractState;
 use CiContract\BookingWriteReportSanitizer;
+use CiContract\BookingWriteReportFailure;
 use CiContract\CanarySlotSearchPolicy;
 use CiContract\CheckSelection;
 use CiContract\ContractAssertionException;
@@ -36,6 +39,7 @@ use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
 use ReleaseGate\GateHttpClient;
 use ReleaseGate\GateCliSupport;
+use ReleaseGate\SafeJsonReport;
 use ReleaseGate\ZeroSurpriseCanaryContext;
 
 require_once __DIR__ . '/../release-gate/lib/ZeroSurpriseCanaryContext.php';
@@ -138,6 +142,12 @@ try {
     $reportPath = writeReport($config ?? [], $checks, $state, $retryMetadata, $failure);
 } catch (Throwable $e) {
     fwrite(STDERR, '[WARN] Failed to write booking write contract report: ' . $e->getMessage() . PHP_EOL);
+    BookingWriteReportFailure::apply(
+        $exitCode,
+        BOOKING_WRITE_CONTRACT_EXIT_RUNTIME_ERROR,
+        $failure,
+        $e,
+    );
 }
 
 $passedChecks = count(array_filter($checks, static fn(array $check): bool => ($check['status'] ?? '') === 'pass'));
@@ -1462,13 +1472,6 @@ function writeReport(array $config, array $checks, array $state, array $retryMet
         $outputPath = dirname(__DIR__, 2) . '/storage/logs/ci/booking-write-contract-' . $timestamp . '.json';
     }
 
-    $directory = dirname($outputPath);
-    if (!is_dir($directory)) {
-        if (!mkdir($directory, 0777, true) && !is_dir($directory)) {
-            throw new RuntimeException('Failed to create report directory: ' . $directory);
-        }
-    }
-
     $passed = count(array_filter($checks, static fn(array $check): bool => ($check['status'] ?? '') === 'pass'));
     $failed = count(array_filter($checks, static fn(array $check): bool => ($check['status'] ?? '') === 'fail'));
     $reportState = BookingWriteReportSanitizer::sanitize($state);
@@ -1493,8 +1496,7 @@ function writeReport(array $config, array $checks, array $state, array $retryMet
         'failure' => $reportFailure,
     ];
 
-    $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-    file_put_contents($outputPath, $json . PHP_EOL);
+    SafeJsonReport::write($outputPath, $report);
 
     return $outputPath;
 }

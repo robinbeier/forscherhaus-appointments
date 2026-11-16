@@ -86,6 +86,7 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
                 cat > "$output_json" <<'JSON'
                 {"checks":[{"name":"dashboard_export_pdf","status":"pass"}]}
                 JSON
+                chmod 600 "$output_json"
                 exit 0
                 BASH
                 ,
@@ -141,7 +142,27 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
             self::assertStringContainsString('--password-stdin', $phpArgs);
             self::assertStringNotContainsString('monitor-pass', $phpArgs);
             self::assertSame('monitor-pass', file_get_contents($phpGateArgsFile . '.stdin'));
-            self::assertStringContainsString('--output-json=' . $reportPath, $phpArgs);
+            self::assertMatchesRegularExpression(
+                '#--output-json=' . preg_quote((string) realpath($outputDir), '#') . '/\.run\.[^/]+/report\.json#',
+                $phpArgs,
+            );
+
+            $firstRunArgs = $phpArgs;
+            $secondResult = $this->runCommand(['bash', 'scripts/ops/kuma_push_pdf_export.sh'], $this->repoRoot(), [
+                'PATH' => $workspace . '/bin:' . (getenv('PATH') ?: ''),
+                'KUMA_PUSH_ENV_FILE' => $envFile,
+                'PHP_GATE_ARGS_FILE' => $phpGateArgsFile,
+                'PHP_SUMMARY_ARGS_FILE' => $phpSummaryArgsFile,
+                'RELEASE_GATE_REPO_ROOT_FILE' => $releaseGateRepoRootFile,
+            ]);
+            self::assertSame(0, $secondResult['exit_code'], $secondResult['stderr']);
+            $secondArgs = file_get_contents($phpGateArgsFile);
+            self::assertIsString($secondArgs);
+            self::assertNotSame(
+                $this->extractOutputPath($firstRunArgs),
+                $this->extractOutputPath($secondArgs),
+            );
+            self::assertFileExists($reportPath);
 
             $summaryArgs = file_get_contents($phpSummaryArgsFile);
             self::assertIsString($summaryArgs);
@@ -150,6 +171,13 @@ final class KumaPushScriptEnvLoadingTest extends TestCase
         } finally {
             $this->removeDirectory($workspace);
         }
+    }
+
+    private function extractOutputPath(string $args): string
+    {
+        self::assertSame(1, preg_match('/--output-json=([^\s]+)/', $args, $matches));
+
+        return $matches[1];
     }
 
     public function testPdfExportRejectsLinkedReportWithoutTouchingItsTarget(): void

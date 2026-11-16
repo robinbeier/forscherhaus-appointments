@@ -93,6 +93,33 @@ final class ReleaseArtifactValidatorTest extends TestCase
         self::assertSame([$path], ReleaseArtifactValidator::missingArchivePaths($entries));
     }
 
+    public function testRequiredPathsIncludeSafeJsonReportRuntime(): void
+    {
+        $path = 'scripts/release-gate/lib/SafeJsonReport.php';
+
+        self::assertContains($path, ReleaseArtifactValidator::requiredPaths());
+
+        $entries = array_values(
+            array_filter($this->completeStaticRequiredPaths(), static fn(string $entry): bool => $entry !== $path),
+        );
+
+        self::assertSame([$path], ReleaseArtifactValidator::missingArchivePaths($entries));
+    }
+
+    public function testRequiredPathsIncludeBookingWriteReportRuntimeClosure(): void
+    {
+        foreach ([
+            'scripts/ci/booking_write_contract_smoke.php',
+            'scripts/ci/lib/BookingWriteReportFailure.php',
+        ] as $path) {
+            self::assertContains($path, ReleaseArtifactValidator::requiredPaths());
+            $entries = array_values(
+                array_filter($this->completeStaticRequiredPaths(), static fn(string $entry): bool => $entry !== $path),
+            );
+            self::assertSame([$path], ReleaseArtifactValidator::missingArchivePaths($entries));
+        }
+    }
+
     public function testRequiredPathsIncludeBothZeroSurpriseComposeOverlays(): void
     {
         foreach (['docker-compose.yml', 'docker/compose.zero-surprise.yml', 'docker/compose.zero-surprise-replay.yml'] as $path) {

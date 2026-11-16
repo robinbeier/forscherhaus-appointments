@@ -9,11 +9,13 @@ if (PHP_SAPI !== 'cli') {
 require_once __DIR__ . '/lib/GateAssertions.php';
 require_once __DIR__ . '/lib/GateCliSupport.php';
 require_once __DIR__ . '/lib/GateHttpClient.php';
+require_once __DIR__ . '/lib/SafeJsonReport.php';
 
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
 use ReleaseGate\GateCliSupport;
 use ReleaseGate\GateHttpClient;
+use ReleaseGate\SafeJsonReport;
 use ReleaseGate\ZeroSurpriseCanaryContext;
 
 require_once __DIR__ . '/lib/ZeroSurpriseCanaryContext.php';
@@ -29,7 +31,7 @@ $failure = null;
 $exitCode = RELEASE_GATE_EXIT_SUCCESS;
 
 $repoRoot = resolveReleaseGateRepoRoot();
-$defaultOutputPath = $repoRoot . '/storage/logs/release-gate/dashboard-gate-' . gmdate('Ymd\THis\Z') . '.json';
+$defaultOutputPath = $repoRoot . '/.release-gate/dashboard-gate-' . gmdate('Ymd\THis\Z') . '.json';
 $csrfDefaults = GateCliSupport::resolveCsrfNamesFromConfig($repoRoot . '/application/config/config.php');
 
 try {
@@ -740,21 +742,7 @@ function assertPdfExportDurationWithinLimit(float $durationMs, int $maxPdfDurati
  */
 function writeJsonReport(string $path, array $report): void
 {
-    $directory = dirname($path);
-
-    if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
-        throw new RuntimeException('Could not create report directory: ' . $directory);
-    }
-
-    $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-
-    if ($json === false) {
-        throw new RuntimeException('Could not encode release gate report as JSON.');
-    }
-
-    if (file_put_contents($path, $json . PHP_EOL) === false) {
-        throw new RuntimeException('Could not write release gate report to: ' . $path);
-    }
+    SafeJsonReport::write($path, $report);
 }
 
 function printUsage(): void

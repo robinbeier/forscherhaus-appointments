@@ -18,7 +18,7 @@ const ZERO_SURPRISE_EXIT_RUNTIME_ERROR = 2;
 
 $repoRoot = dirname(__DIR__, 2);
 $timestamp = gmdate('Ymd\THis\Z');
-$defaultOutputPath = $repoRoot . '/storage/logs/release-gate/zero-surprise-' . $timestamp . '.json';
+$defaultOutputPath = $repoRoot . '/.release-gate/zero-surprise-' . $timestamp . '.json';
 $defaultProfile = 'school-day-default';
 
 if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
@@ -38,10 +38,10 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
         $composeProject = buildComposeProjectName($config['release_id']);
         $config['booking_start_date'] = resolveBoundBookingStartDate($config);
 
-        $initialBookingReportPath = 'storage/logs/release-gate/zero-surprise-booking-initial-' . $timestamp . '.json';
+        $initialBookingReportPath = '.release-gate/zero-surprise-booking-initial-' . $timestamp . '.json';
         $hypotheticalBookingReportPath =
-            'storage/logs/release-gate/zero-surprise-booking-hypothetical-unblocked-' . $timestamp . '.json';
-        $dashboardReportPath = 'storage/logs/release-gate/zero-surprise-dashboard-' . $timestamp . '.json';
+            '.release-gate/zero-surprise-booking-hypothetical-unblocked-' . $timestamp . '.json';
+        $dashboardReportPath = '.release-gate/zero-surprise-dashboard-' . $timestamp . '.json';
 
         $report = new ZeroSurpriseReport(
             $config['release_id'],
@@ -2184,7 +2184,7 @@ function printUsage(): void
         '  --max-pdf-duration-ms=N        Max allowed PDF export duration override',
         '  --timezone=TZID                Time zone override (default profile: Europe/Berlin)',
         '  --output-json=PATH             Consolidated report path',
-        '                                (default: storage/logs/release-gate/zero-surprise-<UTC>.json)',
+        '                                (default: .release-gate/zero-surprise-<UTC>.json)',
         '  --help                         Show this help',
         '',
         'Exit codes:',
