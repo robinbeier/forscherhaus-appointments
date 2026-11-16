@@ -12,6 +12,140 @@ require_once __DIR__ . '/../../../scripts/release-gate/zero_surprise_replay.php'
 
 class ZeroSurpriseReplayTest extends TestCase
 {
+    public function testMigration074RehearsalRunsExactUpDownUpAndPreservesAggregateRows(): void
+    {
+        $phase = 0;
+        $commands = [];
+        $runner = static function (array $command, string $workingDirectory, int $timeoutSeconds) use (&$phase, &$commands): array {
+            $commands[] = implode(' ', $command);
+            $joined = end($commands);
+            if (str_contains($joined, 'console migrate')) {
+                $phase++;
+                return ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
+            }
+            if (str_contains($joined, 'SHOW TABLES')) {
+                return ['exit_code' => 0, 'stdout' => "ea_appointments\nea_migrations\n", 'stderr' => ''];
+            }
+            if (str_contains($joined, 'SELECT version')) {
+                return ['exit_code' => 0, 'stdout' => ($phase === 1 || $phase === 3 ? "74\n" : "73\n"), 'stderr' => ''];
+            }
+            $indexed = $phase === 1 || $phase === 3;
+            return [
+                'exit_code' => 0,
+                'stdout' => "5\t" . ($indexed ? "1\thash\t1\t1\t64" : "0\t\t-1\t-1\t-1") . "\n",
+                'stderr' => '',
+            ];
+        };
+
+        $result = runMigration074Rehearsal(['docker', 'compose'], '/repo', $runner);
+
+        self::assertSame('pass', $result['status']);
+        self::assertSame(0, $result['exit_code']);
+        self::assertSame(
+            ['migrate_up', 'migrate_down', 'migrate_up'],
+            array_values(array_filter(array_column($result['substeps'], 'name'), static fn(string $name): bool => str_starts_with($name, 'migrate_'))),
+        );
+        self::assertSame(3, $phase);
+    }
+
+    public function testMigration074RehearsalFailsClosedOnMigrationFailure(): void
+    {
+        $phase = 0;
+        $runner = static function (array $command, string $workingDirectory, int $timeoutSeconds) use (&$phase): array {
+            $joined = implode(' ', $command);
+            if (str_contains($joined, 'console migrate')) {
+                $phase++;
+                return ['exit_code' => $phase === 2 ? 1 : 0, 'stdout' => '', 'stderr' => 'redacted'];
+            }
+            if (str_contains($joined, 'SHOW TABLES')) {
+                return ['exit_code' => 0, 'stdout' => "ea_appointments\nea_migrations\n", 'stderr' => ''];
+            }
+            if (str_contains($joined, 'SELECT version')) {
+                return ['exit_code' => 0, 'stdout' => ($phase === 1 ? "74\n" : "73\n"), 'stderr' => ''];
+            }
+            return ['exit_code' => 0, 'stdout' => ($phase === 1 ? "5\t1\thash\t1\t1\t64\n" : "5\t0\t\t-1\t-1\t-1\n"), 'stderr' => ''];
+        };
+
+        $result = runMigration074Rehearsal(['docker', 'compose'], '/repo', $runner);
+
+        self::assertSame('fail', $result['status']);
+        self::assertSame(2, $result['exit_code']);
+        self::assertSame(['migration_state', 'migrate_up', 'migration_state', 'migrate_down'], array_column($result['substeps'], 'name'));
+    }
+
+    public function testMigration074BaselineAndStateChecksRejectUnsafeInputsAndDrift(): void
+    {
+        $baseline = [
+            'appointments_table' => true,
+            'migrations_table' => true,
+            'version' => 73,
+            'row_count' => 5,
+            'index_count' => 0,
+        ];
+        self::assertTrue(migration074BaselineIsSafe($baseline));
+        self::assertFalse(migration074BaselineIsSafe([...$baseline, 'version' => 72]));
+        self::assertFalse(migration074BaselineIsSafe([...$baseline, 'index_count' => 1]));
+        self::assertFalse(migration074BaselineIsSafe([...$baseline, 'appointments_table' => false]));
+
+        $indexed = [...$baseline, 'version' => 74, 'index_count' => 1, 'column' => 'hash', 'non_unique' => 1, 'seq_in_index' => 1, 'sub_part' => 64];
+        self::assertTrue(migration074StateMatches($indexed, 74, $baseline));
+        self::assertFalse(migration074StateMatches([...$indexed, 'row_count' => 6], 74, $baseline));
+        self::assertFalse(migration074StateMatches([...$indexed, 'sub_part' => 32], 74, $baseline));
+        self::assertTrue(migration074StateMatches($baseline, 73, $baseline));
+    }
+
+    public function testMigration074InvariantClassifiesSuccessfulDiagnosticAsNonReleaseEvidence(): void
+    {
+        $invariants = collectMigration074Invariants(['status' => 'pass']);
+        self::assertSame('pass', $invariants['migration_074_rehearsal']['status']);
+        self::assertSame('unverified', $invariants['migration_074_rehearsal']['details']['input_attestation']);
+        self::assertFalse($invariants['migration_074_rehearsal']['details']['release_evidence']);
+    }
+
+    public function testTopLevelInvariantSelectionUsesDiagnosticModeAndReportMode(): void
+    {
+        $selected = collectReplayInvariants(
+            ['rehearse_migration_074' => true],
+            ['status' => 'pass'],
+            null,
+            null,
+        );
+        self::assertArrayHasKey('migration_074_rehearsal', $selected);
+        self::assertArrayNotHasKey('overbooking', $selected);
+
+        $report = new ZeroSurpriseReport('synthetic', 'zs-synthetic', [], '/tmp/synthetic.json', 'migration074-diagnostic');
+        self::assertSame('migration074-diagnostic', $report->toArray()['meta']['mode']);
+        $normal = new ZeroSurpriseReport('synthetic', 'zs-synthetic', [], '/tmp/synthetic.json');
+        self::assertSame('predeploy', $normal->toArray()['meta']['mode']);
+    }
+
+    public function testDiagnosticRestoreProjectionDropsEarlyFailurePathsAndOutput(): void
+    {
+        $details = diagnosticRestoreReportDetails(['rehearse_migration_074' => true], [
+            'details' => [
+            'failed_substep' => 'compose_up',
+            'substeps' => [[
+                'name' => 'compose_up',
+                'status' => 'fail',
+                'exit_code' => 2,
+                'command' => 'docker compose --dump-file=/secret/backup.sql',
+                'stderr_tail' => 'password=top-secret /private/path',
+            ]],
+            ],
+        ]);
+        $report = new ZeroSurpriseReport('synthetic', 'zs-synthetic', [], '/tmp/synthetic.json', 'migration074-diagnostic');
+        $report->addStep('restore_dump', 'fail', 2, 1.0, ['details' => $details]);
+        $serialized = json_encode($report->toArray(), JSON_THROW_ON_ERROR);
+
+        self::assertStringNotContainsString('/secret/backup.sql', $serialized);
+        self::assertStringNotContainsString('top-secret', $serialized);
+        self::assertStringContainsString('compose_up', $serialized);
+        self::assertStringContainsString('"exit_code":2', $serialized);
+
+        $ordinary = diagnosticRestoreReportDetails(['rehearse_migration_074' => false], ['details' => ['command' => '/secret/backup.sql']]);
+        self::assertSame('/secret/backup.sql', $ordinary['command']);
+    }
+
     public function testReplayOverlayUsesVerifiedMariaDbRestoreImageAndCredentials(): void
     {
         $overlay = (string) file_get_contents(dirname(__DIR__, 3) . '/docker/compose.zero-surprise-replay.yml');
