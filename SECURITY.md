@@ -92,8 +92,11 @@ The public single-day hours read applies the same conservative future-window
 guard after request and reschedule-authority validation. A safely distant day
 returns the existing empty-hours response before any provider slot analysis;
 an invalid specific provider still fails. Near and boundary days use the normal
-calculation. `BookingAvailableHoursFutureLimitTest` checks that behavior with
-synthetic providers and an availability spy, not with production load.
+calculation. Any-provider days also cap service-matching provider checks at 64;
+the first request above that bound returns the existing 429 unavailable response
+before availability calls. `BookingAvailableHoursFutureLimitTest` checks these
+behaviors with synthetic providers and an availability spy, not with production
+load.
 
 The final public registration POST also skips per-provider slot analysis for a
 definitely distant date after CAPTCHA and reschedule-authority checks. It keeps
