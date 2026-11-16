@@ -33,6 +33,16 @@ Generated buffer rows are children of their ordinary appointment. They are
 deleted or regenerated only after the ordinary appointment rows are selected
 or locked. Buffer rows must not become a new parent level.
 
+The `limit_customer_access` setting is transaction-critical authority for
+Provider and Secretary customer/calendar writes. After locking the actor,
+customer and appointment rows in the order below, those writes reread the
+locked actor role, lock the matching `settings` row with `SELECT ... FOR UPDATE`,
+and pass that value to the final relationship check. Admin customer access is
+independent of this policy, so Admin writes skip the setting lock; this avoids
+an inversion with Basic Settings API writes, which update the setting before
+their final Admin actor lock. A staff mutation and a policy enable serialize on
+the setting row. A nonlocking `setting()` read cannot authorize the final write.
+
 ## Transaction ownership
 
 The outer operation owns the business transaction and the commit/rollback

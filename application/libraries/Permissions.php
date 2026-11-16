@@ -52,8 +52,11 @@ class Permissions
      *
      * @return bool
      */
-    public function has_customer_access(int $user_id, int $customer_id): bool
-    {
+    public function has_customer_access(
+        int $user_id,
+        int $customer_id,
+        ?bool $locked_limit_customer_access = null,
+    ): bool {
         try {
             $customer_role_id = $this->CI->users_model->value($customer_id, 'id_roles');
             $customer_role_slug = $this->CI->roles_model->value($customer_role_id, 'slug');
@@ -73,7 +76,7 @@ class Permissions
             return false;
         }
 
-        $limit_customer_access = setting('limit_customer_access');
+        $limit_customer_access = $locked_limit_customer_access ?? setting('limit_customer_access');
 
         if ($role_slug === DB_SLUG_ADMIN || !$limit_customer_access) {
             return true;
@@ -107,5 +110,51 @@ class Permissions
         }
 
         return false;
+    }
+
+    /** Lock and read the relationship-scope policy for a transaction-scoped write. */
+    public function lock_customer_access_setting(int $actor_user_id): bool
+    {
+        // An Admin's customer access does not depend on this setting. Avoid
+        // taking the setting lock after the Admin actor lock: Basic Settings
+        // API writes take those same locks in the opposite order at finalization.
+        $actor = $this->CI->db
+            ->query('SELECT `id_roles` FROM `' . $this->CI->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE', [
+                $actor_user_id,
+            ])
+            ->row_array();
+        if (!$actor) {
+            throw new RuntimeException('Could not lock customer access actor.');
+        }
+        $role = $this->CI->db
+            ->query('SELECT `slug` FROM `' . $this->CI->db->dbprefix('roles') . '` WHERE `id` = ?', [
+                (int) $actor['id_roles'],
+            ])
+            ->row_array();
+        if (!$role) {
+            throw new RuntimeException('Could not resolve customer access actor role.');
+        }
+        if ($role['slug'] === DB_SLUG_ADMIN) {
+            return true;
+        }
+
+        $settings = $this->CI->db->dbprefix('settings');
+        $setting = $this->CI->db
+            ->query("SELECT `value` FROM `{$settings}` WHERE `name` = ? FOR UPDATE", ['limit_customer_access'])
+            ->row_array();
+
+        if (!$setting || !array_key_exists('value', $setting)) {
+            throw new RuntimeException('Could not lock customer access setting.');
+        }
+
+        $value = (string) $setting['value'];
+        if ($value === '1') {
+            return true;
+        }
+        if ($value === '0') {
+            return false;
+        }
+
+        throw new RuntimeException('Invalid customer access setting.');
     }
 }

@@ -991,27 +991,34 @@ class Booking extends EA_Controller
     {
         $available_providers = $this->providers_model->get_available_providers(true);
 
+        $matching_providers = array_values(
+            array_filter(
+                $available_providers,
+                static fn(array $provider): bool => in_array($service_id, $provider['services']),
+            ),
+        );
+
+        // Keep the final booking path bounded just like the availability
+        // preview.  A distributed public request must not fan out into
+        // unbounded per-provider availability work before the write begins.
+        if (count($matching_providers) > self::MAX_AVAILABLE_HOURS_ANY_PROVIDER_WORK) {
+            return null;
+        }
+
         $service = $this->services_model->find($service_id);
 
         $provider_id = null;
 
         $max_hours_count = 0;
 
-        foreach ($available_providers as $provider) {
-            foreach ($provider['services'] as $provider_service_id) {
-                if ($provider_service_id == $service_id) {
-                    // Check if the provider is available for the requested date.
-                    $available_hours = $this->availability->get_available_hours($date, $service, $provider);
+        foreach ($matching_providers as $provider) {
+            // Check if the provider is available for the requested date.
+            $available_hours = $this->availability->get_available_hours($date, $service, $provider);
 
-                    if (
-                        count($available_hours) > $max_hours_count &&
-                        (empty($hour) || in_array($hour, $available_hours))
-                    ) {
-                        $provider_id = $provider['id'];
+            if (count($available_hours) > $max_hours_count && (empty($hour) || in_array($hour, $available_hours))) {
+                $provider_id = $provider['id'];
 
-                        $max_hours_count = count($available_hours);
-                    }
-                }
+                $max_hours_count = count($available_hours);
             }
         }
 

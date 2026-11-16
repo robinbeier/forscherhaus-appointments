@@ -27,6 +27,8 @@ final class CalendarCustomerAccessHttpTest extends TestCase
     private ?int $foreignAppointmentId = null;
     private ?int $secretaryId = null;
     private ?array $providerRolePermissionSnapshot = null;
+    /** @var list<string> */
+    private array $policyWaitDiagnostics = [];
 
     protected function setUp(): void
     {
@@ -119,6 +121,124 @@ final class CalendarCustomerAccessHttpTest extends TestCase
             self::assertSame($beforeAppointment, $fixture->row('appointments', (int) $beforeAppointment['id']));
         } finally {
             $this->restoreProviderRolePermissions();
+        }
+    }
+
+    public function testCalendarSaveWaitsForCommittedCustomerScopePolicy(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $foreignCustomerId = $this->createForeignCustomer($fixture->run . '-scope-race');
+        $client = $this->login($this->credentials['provider_username'], $this->credentials['password']);
+        $db = get_instance()->db;
+        self::assertTrue((bool) $db->update('settings', ['value' => '0'], ['name' => 'limit_customer_access']));
+
+        $observer = get_instance()->load->database(
+            [
+                'hostname' => 'mysql',
+                'username' => 'root',
+                'password' => 'secret',
+                'database' => 'easyappointments',
+                'dbdriver' => 'mysqli',
+                'dbprefix' => $db->dbprefix,
+                'pconnect' => false,
+                'db_debug' => false,
+                'char_set' => 'utf8mb4',
+                'dbcollat' => 'utf8mb4_general_ci',
+            ],
+            true,
+        );
+        self::assertTrue($observer->query('SET SESSION TRANSACTION READ ONLY'));
+        $ownerId = mysqli_thread_id($db->conn_id);
+        self::assertNotSame($ownerId, mysqli_thread_id($observer->conn_id));
+
+        $multi = null;
+        $handle = null;
+        $transactionOpen = false;
+        try {
+            self::assertTrue($db->trans_begin());
+            $transactionOpen = true;
+            self::assertNotFalse(
+                $db->query(
+                    'SELECT `value` FROM `' .
+                        $db->dbprefix('settings') .
+                        '` WHERE `name` = "limit_customer_access" FOR UPDATE',
+                ),
+            );
+            self::assertTrue((bool) $db->update('settings', ['value' => '1'], ['name' => 'limit_customer_access']));
+
+            $csrf = $client->getCookie('csrf_cookie');
+            self::assertNotSame('', (string) $csrf);
+            $cookies = array_map(
+                static fn(array $record): string => $record['name'] . '=' . $record['value'],
+                $client->cookieRecords(),
+            );
+            $fields = [
+                'appointment_data' => [
+                    'start_datetime' => date('Y-m-d 14:00:00', strtotime('+14 days')),
+                    'end_datetime' => date('Y-m-d 14:30:00', strtotime('+14 days')),
+                    'notes' => $fixture->run . '-scope-race',
+                    'id_users_provider' => $fixture->providerId,
+                    'id_users_customer' => $foreignCustomerId,
+                    'id_services' => $fixture->serviceId,
+                    'is_unavailability' => false,
+                ],
+                'customer_data' => [],
+                'csrf_token' => $csrf,
+            ];
+            $multi = curl_multi_init();
+            $handle = curl_init($this->server->baseUrl . '/calendar/save_appointment');
+            curl_setopt_array($handle, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => http_build_query($fields),
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_TIMEOUT => 15,
+                CURLOPT_HTTPHEADER => [
+                    'Content-Type: application/x-www-form-urlencoded',
+                    'Cookie: ' . implode('; ', $cookies),
+                ],
+            ]);
+            self::assertSame(CURLM_OK, curl_multi_add_handle($multi, $handle));
+
+            $running = 0;
+            $waiting = false;
+            $deadline = microtime(true) + 8;
+            do {
+                self::assertSame(CURLM_OK, curl_multi_exec($multi, $running));
+                $waiting = $this->observesCustomerPolicyWait($observer, $ownerId);
+                if ($waiting || $running === 0) {
+                    break;
+                }
+                curl_multi_select($multi, 0.05);
+            } while (microtime(true) < $deadline);
+            self::assertTrue(
+                $waiting,
+                'Calendar mutation must wait on the locked customer-scope setting. Observed: ' .
+                    implode(' | ', $this->policyWaitDiagnostics),
+            );
+
+            self::assertTrue($db->trans_commit());
+            $transactionOpen = false;
+            self::assertTrue($this->drainCurl($multi, $handle));
+            self::assertSame(403, (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE));
+            self::assertSame(0, $db->get_where('appointments', ['notes' => $fixture->run . '-scope-race'])->num_rows());
+        } finally {
+            if ($transactionOpen && $db->trans_active()) {
+                $db->trans_rollback();
+            }
+            if ($multi instanceof CurlMultiHandle && $handle instanceof CurlHandle) {
+                $this->drainCurl($multi, $handle);
+                curl_multi_remove_handle($multi, $handle);
+            }
+            if ($handle instanceof CurlHandle) {
+                curl_close($handle);
+            }
+            if ($multi instanceof CurlMultiHandle) {
+                curl_multi_close($multi);
+            }
+            $observer->close();
         }
     }
 
@@ -920,6 +1040,46 @@ final class CalendarCustomerAccessHttpTest extends TestCase
         self::assertIsArray($decoded);
 
         return $decoded;
+    }
+
+    private function observesCustomerPolicyWait(object $observer, int $ownerId): bool
+    {
+        $result = $observer->query(
+            'SELECT l.OBJECT_NAME, COALESCE(s.SQL_TEXT, r.PROCESSLIST_INFO) AS statement_text FROM performance_schema.data_lock_waits w JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID JOIN performance_schema.threads b ON b.THREAD_ID = w.BLOCKING_THREAD_ID JOIN performance_schema.threads r ON r.THREAD_ID = w.REQUESTING_THREAD_ID LEFT JOIN performance_schema.events_statements_current s ON s.THREAD_ID = r.THREAD_ID WHERE b.PROCESSLIST_ID = ' .
+                $ownerId,
+        );
+        self::assertNotFalse($result);
+        $this->policyWaitDiagnostics = [];
+        foreach ($result->result_array() as $row) {
+            $statement = strtoupper(str_replace('`', '', (string) $row['statement_text']));
+            $this->policyWaitDiagnostics[] = ($row['OBJECT_NAME'] ?? '?') . ':' . $statement;
+            if (
+                ($row['OBJECT_NAME'] ?? null) === $observer->dbprefix('settings') &&
+                str_contains($statement, 'LIMIT_CUSTOMER_ACCESS') &&
+                str_contains($statement, 'FOR UPDATE')
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function drainCurl(CurlMultiHandle $multi, CurlHandle $handle): bool
+    {
+        $deadline = microtime(true) + 8;
+        do {
+            $result = curl_multi_exec($multi, $running);
+            if ($result !== CURLM_OK) {
+                return false;
+            }
+            if ($running === 0) {
+                return curl_errno($handle) === CURLE_OK;
+            }
+            curl_multi_select($multi, 0.05);
+        } while (microtime(true) < $deadline);
+
+        return false;
     }
 
     private function customerEmail(int $customerId): string

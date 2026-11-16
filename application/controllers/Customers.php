@@ -598,10 +598,20 @@ class Customers extends EA_Controller
         }
 
         try {
-            if (
-                cannot($action, PRIV_CUSTOMERS, $user_id) ||
-                !$this->permissions->has_customer_access($user_id, $customer_id)
-            ) {
+            if (cannot($action, PRIV_CUSTOMERS, $user_id)) {
+                return false;
+            }
+
+            $locked_limit_customer_access =
+                $this->permissions instanceof Permissions
+                    ? $this->permissions->lock_customer_access_setting($user_id)
+                    : null;
+            $has_customer_access =
+                $this->permissions instanceof Permissions
+                    ? $this->permissions->has_customer_access($user_id, $customer_id, $locked_limit_customer_access)
+                    : $this->permissions->has_customer_access($user_id, $customer_id);
+
+            if (!$has_customer_access) {
                 return false;
             }
 

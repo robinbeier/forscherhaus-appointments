@@ -102,9 +102,12 @@ The final public registration POST also skips per-provider slot analysis for a
 definitely distant date after CAPTCHA and reschedule-authority checks. It keeps
 service and specific-provider validation and returns the existing unavailable
 response without creating a customer or appointment. Near and boundary dates
-retain the normal calculation. `BookingRegisterFutureLimitTest` measures the
-pre-transaction path with synthetic providers and a valid CAPTCHA; it does not
-measure production throughput or replace the normal booking success tests.
+retain the normal calculation, but an any-provider request with more than 64
+service-matching providers returns the existing unavailable response before
+availability calls or the booking transaction. `BookingRegisterFutureLimitTest`
+measures the pre-transaction path with synthetic providers and a valid CAPTCHA;
+it does not measure production throughput or replace the normal booking success
+tests.
 
 JSON bodies read through `EA_Input::json()` are bounded to 1 MiB before
 decoding, including requests whose `Content-Length` is absent or incorrect.
@@ -210,9 +213,11 @@ waits must deny the write before mutation.
 visibility limit, and an authorized CRUD lifecycle with isolated synthetic
 HTTP and database data. `CustomersLegacyRelationshipRaceHttpTest` checks the
 actual customer-row lock wait and relationship revocation through canonical
-and direct HTTP aliases with own synthetic data. These tests do not establish
-serialization of unrelated role-permission or setting changes, or a production
-customer write result.
+and direct HTTP aliases with own synthetic data. It also checks update and
+delete requests waiting on the `limit_customer_access` row while an Admin
+enables the scope. These tests do not establish serialization of unrelated
+role-permission changes, every Calendar interleaving, or a production customer
+write result.
 
 Legacy General and Business Settings page reads (`general_settings`,
 `general_settings/index`, `business_settings`, and `business_settings/index`)
@@ -482,6 +487,13 @@ appointment scope is enforced before related records are loaded or serialized;
 customer, appointment, provider, and service data use UI-specific projections.
 The customer page still needs an appointment hash for its existing edit link,
 so only an in-scope appointment may carry that public management capability.
+For Provider and Secretary customer/calendar mutations, `limit_customer_access`
+is transaction-critical authority: after actor, customer, and appointment rows
+are locked, the mutation must lock and use the setting row's current value
+through commit. Admin access is policy-independent and does not take this
+setting lock after its actor lock. The booking-settings and settings API writers
+update the same row transactionally; a nonlocking `setting()` read is insufficient
+for the final staff authorization check.
 An authenticated customer-page denial after a stored role change must leave
 the session's existing return destination unchanged; anonymous deep links
 still set their login return destination. This applies to the canonical page
@@ -586,6 +598,12 @@ does not depend on the finer `system_settings` permission; see the
 [Settings API contract](docs/ci-write-contracts.md#settings-api-v1). The
 isolated synthetic role-revocation regression is not a productive account
 test or a proof about concurrent role changes.
+Classic Admin writes to the global API token compare the session's credential
+generation with the version read under the locked actor row before saving. A
+password or LDAP identity change that commits first denies the stale in-flight
+token write without changing the token. This is a stronger boundary for that
+credential-bearing write; other classic requests retain their documented
+next-request session invalidation semantics.
 
 Settings API v1 `index` and `show` are GET-only through canonical routes and
 direct controller aliases. Other methods on the direct read aliases return 405

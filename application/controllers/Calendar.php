@@ -501,13 +501,24 @@ class Calendar extends EA_Controller
                     throw new RuntimeException('You do not have the required permissions for this task.', 403);
                 }
 
+                $locked_limit_customer_access =
+                    $this->permissions instanceof Permissions
+                        ? $this->permissions->lock_customer_access_setting((int) session('user_id'))
+                        : null;
+
                 foreach (
                     [$customer_data['id'] ?? null, $appointment_data['id_users_customer'] ?? null]
                     as $customer_id
                 ) {
                     if (
                         !empty($customer_id) &&
-                        !$this->permissions->has_customer_access((int) session('user_id'), $customer_id)
+                        !($this->permissions instanceof Permissions
+                            ? $this->permissions->has_customer_access(
+                                (int) session('user_id'),
+                                $customer_id,
+                                $locked_limit_customer_access,
+                            )
+                            : $this->permissions->has_customer_access((int) session('user_id'), $customer_id))
                     ) {
                         throw new RuntimeException('You do not have the required permissions for this task.', 403);
                     }

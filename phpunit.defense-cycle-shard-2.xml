@@ -6,6 +6,7 @@
         <testsuite name="DefenseCycleOrdinaryFlowsShard2">
             <file>./tests/Integration/Controllers/LocalizationHttpTest.php</file>
             <file>./tests/Integration/RescheduleCustomerOverlapDatabaseTest.php</file>
+            <file>./tests/Integration/Migrations/AppointmentHashIndexDatabaseTest.php</file>
             <file>./tests/Integration/AccountSecurityMatrixProbeTest.php</file>
             <file>./tests/Integration/CustomerRoleBoundaryProbeTest.php</file>
             <file>./tests/Integration/CustomersApiWriteProbeTest.php</file>

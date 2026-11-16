@@ -132,10 +132,17 @@ class Api_settings extends EA_Controller
             // Bind authority to the committed setting: account deletion, demotion
             // and role-bit revocation must serialize before or after this write.
             $actor = $this->db
-                ->query('SELECT `id_roles` FROM `' . $this->db->dbprefix('users') . '` WHERE `id` = ? FOR UPDATE', [
-                    $user_id,
-                ])
+                ->query(
+                    'SELECT `id_roles`, `credential_version` FROM `' .
+                        $this->db->dbprefix('users') .
+                        '` WHERE `id` = ? FOR UPDATE',
+                    [$user_id],
+                )
                 ->row_array();
+            $session_version = session('credential_version', 0);
+            if (!is_int($session_version) && !ctype_digit((string) $session_version)) {
+                $session_version = null;
+            }
             $role = $actor
                 ? $this->db
                     ->query(
@@ -148,7 +155,15 @@ class Api_settings extends EA_Controller
                 : null;
             $mask = (int) ($role['system_settings'] ?? 0);
             $known_mask = PRIV_VIEW | PRIV_ADD | PRIV_EDIT | PRIV_DELETE;
-            if (!$actor || !$role || $mask < 0 || ($mask & ~$known_mask) !== 0 || ($mask & PRIV_EDIT) !== PRIV_EDIT) {
+            if (
+                !$actor ||
+                $session_version === null ||
+                (int) ($actor['credential_version'] ?? -1) !== (int) $session_version ||
+                !$role ||
+                $mask < 0 ||
+                ($mask & ~$known_mask) !== 0 ||
+                ($mask & PRIV_EDIT) !== PRIV_EDIT
+            ) {
                 if ($owns_transaction) {
                     $this->db->trans_rollback();
                     $owns_transaction = false;

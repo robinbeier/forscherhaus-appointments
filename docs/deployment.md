@@ -123,6 +123,12 @@ For a release with pending migrations:
 Migration 073 requires MySQL 8.4+ or MariaDB 11.8+. On an older server,
 back up and upgrade the database first, then rehearse the pending migrations
 against a restored backup; the migration refuses the older version before DDL.
+Migration 074 adds a non-unique 64-character prefix index to
+`appointments.hash`. Rehearse its build and rollback on the restored database,
+check the live appointment count and available space, and allow for a table
+index build during the separately authorized migration step. The previous
+application can use this additive index, but the normal bound release still
+requires the live migration to finish before its deployment preflight.
 
 1. Review and rehearse the exact migration delta against a restored backup.
    Verify a fresh production backup and successful restoration before any live
