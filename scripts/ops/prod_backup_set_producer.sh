@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ops/lib/prod_common.sh
 source "${SCRIPT_DIR}/lib/prod_common.sh"
 
-SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
+SSH_OPTIONS=(-o StrictHostKeyChecking=yes)
 PROD_SSH_TARGET="$(prod_default_ssh_target)"
 EXECUTE=0
 CONFIRM_LIVE_WRITE=''

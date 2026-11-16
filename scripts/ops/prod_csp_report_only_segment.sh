@@ -8,7 +8,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/prod_common.sh"
 
-SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
+SSH_OPTIONS=(-o StrictHostKeyChecking=yes)
 PROD_SSH_TARGET="$(prod_default_ssh_target)"
 STATUS_SCRIPT="${CSP_SEGMENT_STATUS_SCRIPT:-${SCRIPT_DIR}/prod_csp_report_only_status.sh}"
 ACTIVATION_VALIDATOR="${SCRIPT_DIR}/csp_report_only_activation_validate_receipt.php"

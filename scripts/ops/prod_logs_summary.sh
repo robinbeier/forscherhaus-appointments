@@ -11,7 +11,7 @@ source "${SCRIPT_DIR}/lib/prod_common.sh"
 # shellcheck source=scripts/ops/lib/app_log_classification.sh
 source "${SCRIPT_DIR}/lib/app_log_classification.sh"
 
-SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
+SSH_OPTIONS=(-o StrictHostKeyChecking=yes)
 PROD_SSH_TARGET="$(prod_default_ssh_target)"
 SINCE="60 min ago"
 

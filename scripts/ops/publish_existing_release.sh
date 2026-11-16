@@ -13,6 +13,7 @@ EXPECTED_PROVENANCE_SHA=""
 UPLOAD=""
 REMOTE_DIR="/root/releases"
 VERIFY_ONLY=0
+SSH_OPTIONS=(-o StrictHostKeyChecking=yes)
 
 usage() {
   cat <<'USAGE'
@@ -87,16 +88,16 @@ REMOTE_NONCE="$(php -r 'echo bin2hex(random_bytes(16));')"
 ARCHIVE_TEMP=".${REL}.tar.gz.upload-${REMOTE_NONCE}"
 PROVENANCE_TEMP=".${REL}.build-provenance.json.upload-${REMOTE_NONCE}"
 remote_cleanup() {
-  ssh "$UPLOAD" /usr/bin/rm -f -- "$REMOTE_DIR/$ARCHIVE_TEMP" "$REMOTE_DIR/$PROVENANCE_TEMP" >/dev/null 2>&1 || true
+  ssh "${SSH_OPTIONS[@]}" "$UPLOAD" /usr/bin/rm -f -- "$REMOTE_DIR/$ARCHIVE_TEMP" "$REMOTE_DIR/$PROVENANCE_TEMP" >/dev/null 2>&1 || true
 }
 trap remote_cleanup EXIT
 
-PREPARE_STATUS="$(ssh "$UPLOAD" /usr/bin/python3 -I -B - --prepare "$REMOTE_DIR" \
+PREPARE_STATUS="$(ssh "${SSH_OPTIONS[@]}" "$UPLOAD" /usr/bin/python3 -I -B - --prepare "$REMOTE_DIR" \
   < "$PROJECT/scripts/ops/libexec/publish_release_pair_v1.py")"
 [[ "$PREPARE_STATUS" == "ready" ]] || { echo "[!] Remote release root preparation failed." >&2; exit 70; }
-scp -- "$ARCHIVE" "$UPLOAD:$REMOTE_DIR/$ARCHIVE_TEMP"
-scp -- "$PROVENANCE" "$UPLOAD:$REMOTE_DIR/$PROVENANCE_TEMP"
-ssh "$UPLOAD" /usr/bin/chmod 0600 "$REMOTE_DIR/$ARCHIVE_TEMP" "$REMOTE_DIR/$PROVENANCE_TEMP"
+scp "${SSH_OPTIONS[@]}" -- "$ARCHIVE" "$UPLOAD:$REMOTE_DIR/$ARCHIVE_TEMP"
+scp "${SSH_OPTIONS[@]}" -- "$PROVENANCE" "$UPLOAD:$REMOTE_DIR/$PROVENANCE_TEMP"
+ssh "${SSH_OPTIONS[@]}" "$UPLOAD" /usr/bin/chmod 0600 "$REMOTE_DIR/$ARCHIVE_TEMP" "$REMOTE_DIR/$PROVENANCE_TEMP"
 
 # Publication must never proceed if the local source changed during transfer.
 [[ "$(shasum -a 256 "$ARCHIVE" | awk '{print $1}')" == "$ARCHIVE_SHA" ]] || {
@@ -106,7 +107,7 @@ ssh "$UPLOAD" /usr/bin/chmod 0600 "$REMOTE_DIR/$ARCHIVE_TEMP" "$REMOTE_DIR/$PROV
   echo "[!] Local provenance changed during transfer." >&2; exit 70;
 }
 
-PUBLISH_STATUS="$(ssh "$UPLOAD" /usr/bin/python3 -I -B - \
+PUBLISH_STATUS="$(ssh "${SSH_OPTIONS[@]}" "$UPLOAD" /usr/bin/python3 -I -B - \
   "$REMOTE_DIR" "$REL" "$REMOTE_NONCE" "$ARCHIVE_SHA" "$ARCHIVE_SIZE" \
   "$PROVENANCE_SHA" "$PROVENANCE_SIZE" \
   < "$PROJECT/scripts/ops/libexec/publish_release_pair_v1.py")"
