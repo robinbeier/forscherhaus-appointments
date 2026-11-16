@@ -370,12 +370,18 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
                     'end_date' => $config['end_date'] ?? null,
                 ]);
             }
+            $diagnostic = cliRequestsMigration074Rehearsal();
+            if ($diagnostic) {
+                $fallbackConfig['input_attestation'] = 'unverified';
+                $fallbackConfig['release_evidence'] = false;
+            }
 
             $report = new ZeroSurpriseReport(
                 (string) ($config['release_id'] ?? 'unknown-release'),
                 $fallbackProject,
                 $fallbackConfig,
                 (string) ($config['output_json'] ?? $defaultOutputPath),
+                $diagnostic ? 'migration074-diagnostic' : 'predeploy',
             );
         }
 
