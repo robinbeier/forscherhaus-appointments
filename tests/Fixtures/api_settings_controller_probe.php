@@ -20,11 +20,11 @@ $saved = [];
 
 function session(string|array|null $key = null, mixed $default = null): mixed
 {
-    if ($key !== 'user_id') {
+    if (!in_array($key, ['user_id', 'credential_version'], true)) {
         throw new RuntimeException('Unexpected session probe key.');
     }
 
-    return 42;
+    return $key === 'user_id' ? 42 : 0;
 }
 function cannot(string $verb, string $permission, ?int $user_id = null): bool
 {
@@ -108,7 +108,7 @@ final class ProbeSettingsDatabase
         $row = str_contains($sql, '`ea_users`')
             ? ($GLOBALS['scenario'] === 'deleted'
                 ? []
-                : ['id_roles' => 7])
+                : ['id_roles' => 7, 'credential_version' => 0])
             : ['system_settings' => $role];
         return new class ($row) {
             public function __construct(private array $row) {}

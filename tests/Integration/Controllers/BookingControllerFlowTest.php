@@ -371,6 +371,70 @@ class BookingControllerFlowTest extends TestCase
         self::assertFalse($this->fixtures->customerExistsByEmail($customerEmail));
     }
 
+    public function testAnyProviderRegistrationBoundsProviderAvailabilityFanout(): void
+    {
+        $serviceId = 731;
+        $providers = array_map(static fn(int $id): array => ['id' => $id, 'services' => [$serviceId]], range(1, 65));
+        $availability = new class extends \Availability {
+            public int $invocations = 0;
+
+            public function get_available_hours(
+                string $date,
+                array $service,
+                array $provider,
+                ?int $exclude_appointment_id = null,
+            ): array {
+                $this->invocations++;
+
+                return ['09:00'];
+            }
+        };
+        $controller = new class extends Booking {
+            public function __construct() {}
+
+            public function resolveAnyProvider(int $serviceId, string $date, ?string $hour): ?int
+            {
+                return $this->search_any_provider($serviceId, $date, $hour);
+            }
+        };
+        $controller->providers_model = new class ($providers) {
+            /** @param array<int, array{id:int,services:array<int,int>}> $providers */
+            public function __construct(private array $providers) {}
+
+            public function get_available_providers(bool $excludePrivate): array
+            {
+                return $this->providers;
+            }
+        };
+        $controller->services_model = new class {
+            public function find(int $serviceId): array
+            {
+                return ['id' => $serviceId];
+            }
+        };
+        $controller->availability = $availability;
+
+        self::assertNull($controller->resolveAnyProvider($serviceId, '2035-01-01', '09:00'));
+        self::assertSame(0, $availability->invocations);
+
+        $providersWithUnrelatedServices = array_merge(
+            array_slice($providers, 0, 64),
+            array_map(static fn(int $id): array => ['id' => $id, 'services' => [$serviceId + 1]], range(66, 165)),
+        );
+        $controller->providers_model = new class ($providersWithUnrelatedServices) {
+            /** @param array<int, array{id:int,services:array<int,int>}> $providers */
+            public function __construct(private array $providers) {}
+
+            public function get_available_providers(bool $excludePrivate): array
+            {
+                return $this->providers;
+            }
+        };
+
+        self::assertSame(1, $controller->resolveAnyProvider($serviceId, '2035-01-01', '09:00'));
+        self::assertSame(64, $availability->invocations);
+    }
+
     public function testCreationIdentityLockSerializesAcrossDatabaseConnections(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();

@@ -344,6 +344,11 @@ final class ApiSettingsLegacyHttpTest extends TestCase
         $this->assertConcurrentRevocation('actor');
     }
 
+    public function testConcurrentCredentialRevocationPreventsApiTokenWrite(): void
+    {
+        $this->assertConcurrentRevocation('credential');
+    }
+
     private function assertConcurrentRevocation(string $kind): void
     {
         $db = get_instance()->db;
@@ -383,8 +388,17 @@ final class ApiSettingsLegacyHttpTest extends TestCase
                 self::assertTrue(
                     $db->update('roles', ['system_settings' => $revoked], ['id' => (int) $adminRole['id']]),
                 );
-            } else {
+            } elseif ($kind === 'actor') {
                 self::assertTrue($db->delete('users', ['id' => $this->fixture->actorId]));
+            } else {
+                self::assertTrue(
+                    (bool) $db->query(
+                        'UPDATE `' .
+                            $db->dbprefix('users') .
+                            '` SET `credential_version` = `credential_version` + 1 WHERE `id` = ?',
+                        [$this->fixture->actorId],
+                    ),
+                );
             }
 
             $cookies = [];

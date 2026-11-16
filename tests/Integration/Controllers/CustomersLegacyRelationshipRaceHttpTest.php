@@ -111,6 +111,140 @@ final class CustomersLegacyRelationshipRaceHttpTest extends TestCase
         get_instance()->db->delete('appointments', ['id_users_customer' => $secondaryId]);
     }
 
+    /** @return iterable<string, array{string}> */
+    public static function customerScopePolicyRaceCases(): iterable
+    {
+        yield 'update' => ['update'];
+        yield 'destroy' => ['destroy'];
+    }
+
+    #[DataProvider('customerScopePolicyRaceCases')]
+    public function testCustomerMutationWaitsForCommittedScopePolicy(string $action): void
+    {
+        $fixture = $this->fixture;
+        $db = get_instance()->db;
+        self::assertNotNull($fixture);
+        $client = $this->loginProvider();
+        $beforeCustomer = $fixture->row('users', $fixture->customerId);
+        self::assertTrue((bool) $db->update('settings', ['value' => '0'], ['name' => 'limit_customer_access']));
+        $observer = get_instance()->load->database(
+            [
+                'hostname' => 'mysql',
+                'username' => 'root',
+                'password' => 'secret',
+                'database' => 'easyappointments',
+                'dbdriver' => 'mysqli',
+                'dbprefix' => $db->dbprefix,
+                'pconnect' => false,
+                'db_debug' => false,
+                'char_set' => 'utf8mb4',
+                'dbcollat' => 'utf8mb4_general_ci',
+            ],
+            true,
+        );
+        self::assertTrue($observer->query('SET SESSION TRANSACTION READ ONLY'));
+        $ownerId = mysqli_thread_id($db->conn_id);
+        self::assertNotSame($ownerId, mysqli_thread_id($observer->conn_id));
+
+        $multi = null;
+        $handle = null;
+        $transactionOpen = false;
+        try {
+            self::assertTrue($db->trans_begin());
+            $transactionOpen = true;
+            self::assertNotFalse(
+                $db->query(
+                    'SELECT `value` FROM `' .
+                        $db->dbprefix('settings') .
+                        '` WHERE `name` = "limit_customer_access" FOR UPDATE',
+                ),
+            );
+            self::assertTrue((bool) $db->update('settings', ['value' => '1'], ['name' => 'limit_customer_access']));
+
+            $csrf = $client->getCookie('csrf_cookie');
+            self::assertNotSame('', (string) $csrf);
+            $cookies = array_map(
+                static fn(array $r): string => $r['name'] . '=' . $r['value'],
+                $client->cookieRecords(),
+            );
+            $fields =
+                $action === 'update'
+                    ? [
+                        'customer' => array_replace($beforeCustomer, [
+                            'id' => $fixture->customerId,
+                            'first_name' => 'Must Stay Unchanged',
+                        ]),
+                        'csrf_token' => $csrf,
+                    ]
+                    : ['customer_id' => $fixture->customerId, 'csrf_token' => $csrf];
+            $multi = curl_multi_init();
+            $handle = curl_init($this->server->baseUrl . '/customers/' . $action);
+            curl_setopt_array($handle, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => http_build_query($fields),
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_TIMEOUT => 15,
+                CURLOPT_HTTPHEADER => [
+                    'Content-Type: application/x-www-form-urlencoded',
+                    'Cookie: ' . implode('; ', $cookies),
+                ],
+            ]);
+            self::assertSame(CURLM_OK, curl_multi_add_handle($multi, $handle));
+
+            $running = 0;
+            $waiting = false;
+            $deadline = microtime(true) + 8;
+            do {
+                self::assertSame(CURLM_OK, curl_multi_exec($multi, $running));
+                $waiting = $this->observesPolicyWait($observer, $ownerId);
+                if ($waiting || $running === 0) {
+                    break;
+                }
+                curl_multi_select($multi, 0.05);
+            } while (microtime(true) < $deadline);
+            self::assertTrue($waiting, 'Mutation must wait specifically for the locked policy row.');
+
+            self::assertTrue($db->trans_commit());
+            $transactionOpen = false;
+            self::assertTrue($this->drain($multi, $handle));
+            self::assertSame(403, (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE));
+            self::assertSame($beforeCustomer, $fixture->row('users', $fixture->customerId));
+        } finally {
+            if ($transactionOpen && $db->trans_active()) {
+                $db->trans_rollback();
+            }
+            if ($multi instanceof CurlMultiHandle && $handle instanceof CurlHandle) {
+                $this->drain($multi, $handle);
+                curl_multi_remove_handle($multi, $handle);
+            }
+            if ($handle instanceof CurlHandle) {
+                curl_close($handle);
+            }
+            if ($multi instanceof CurlMultiHandle) {
+                curl_multi_close($multi);
+            }
+            $observer->close();
+        }
+    }
+
+    public function testCustomerScopeLockRejectsInvalidStoredPolicy(): void
+    {
+        $db = get_instance()->db;
+        self::assertTrue(
+            (bool) $db->update('settings', ['value' => 'unexpected'], ['name' => 'limit_customer_access']),
+        );
+        self::assertTrue($db->trans_begin());
+
+        try {
+            $this->expectException(RuntimeException::class);
+            get_instance()->permissions->lock_customer_access_setting($this->fixture->providerId);
+        } finally {
+            $db->trans_rollback();
+        }
+    }
+
     public function testProviderCannotDeleteCustomerWithForeignProviderAppointment(): void
     {
         $fixture = $this->fixture;
@@ -464,6 +598,26 @@ final class CustomersLegacyRelationshipRaceHttpTest extends TestCase
                 $row['OBJECT_NAME'] === $observer->dbprefix('users') &&
                 ($isTargetLockingRead || $isTargetUpdate) &&
                 str_contains($statement, (string) $customerId)
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function observesPolicyWait(object $observer, int $ownerId): bool
+    {
+        $result = $observer->query(
+            'SELECT l.OBJECT_NAME, COALESCE(s.SQL_TEXT, r.PROCESSLIST_INFO) AS statement_text FROM performance_schema.data_lock_waits w JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID JOIN performance_schema.threads b ON b.THREAD_ID = w.BLOCKING_THREAD_ID JOIN performance_schema.threads r ON r.THREAD_ID = w.REQUESTING_THREAD_ID LEFT JOIN performance_schema.events_statements_current s ON s.THREAD_ID = r.THREAD_ID WHERE b.PROCESSLIST_ID = ' .
+                $ownerId,
+        );
+        self::assertNotFalse($result);
+        foreach ($result->result_array() as $row) {
+            $statement = strtoupper(str_replace('`', '', (string) $row['statement_text']));
+            if (
+                ($row['OBJECT_NAME'] ?? null) === $observer->dbprefix('settings') &&
+                str_contains($statement, 'LIMIT_CUSTOMER_ACCESS') &&
+                str_contains($statement, 'FOR UPDATE')
             ) {
                 return true;
             }
