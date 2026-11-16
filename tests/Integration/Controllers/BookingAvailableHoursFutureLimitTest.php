@@ -24,6 +24,10 @@ final class BookingAvailableHoursFutureLimitTest extends ApplicationTestCase
 
     private ?int $serviceId = null;
 
+    private \EA_Output $originalOutput;
+
+    private \EA_Output $testOutput;
+
     /** @var array<string, array{exists:bool,value:?string}> */
     private array $settingSnapshots = [];
 
@@ -36,11 +40,25 @@ final class BookingAvailableHoursFutureLimitTest extends ApplicationTestCase
         $this->setSetting('disable_booking', '0');
         $this->setSetting('future_booking_limit', '30');
 
+        $this->originalOutput = get_instance()->output;
+        $this->testOutput = new class extends \EA_Output {
+            public int $statusCode = 200;
+
+            public function set_status_header($code = 200, $text = '')
+            {
+                $this->statusCode = (int) $code;
+
+                return parent::set_status_header($code, $text);
+            }
+        };
+        get_instance()->output = $this->testOutput;
+
         try {
             $this->createSyntheticFixture();
         } catch (\Throwable $e) {
             $this->cleanupSyntheticFixture();
             $this->restoreSettings();
+            get_instance()->output = $this->originalOutput;
             throw $e;
         }
     }
@@ -49,6 +67,7 @@ final class BookingAvailableHoursFutureLimitTest extends ApplicationTestCase
     {
         $this->cleanupSyntheticFixture();
         $this->restoreSettings();
+        get_instance()->output = $this->originalOutput;
         parent::tearDown();
     }
 
@@ -108,7 +127,30 @@ final class BookingAvailableHoursFutureLimitTest extends ApplicationTestCase
         self::assertSame(0, $longLimit['availability_invocations']);
     }
 
-    /** @return array{availability_invocations:int,response:array} */
+    public function testAnyProviderDailyCapRejectsOnlyTheFirstProviderBeyondTheBound(): void
+    {
+        $this->createAdditionalProviders(62);
+        $nearDate = (new DateTimeImmutable('+7 days'))->format('Y-m-d');
+
+        $atCap = $this->measure($nearDate, ANY_PROVIDER);
+        self::assertSame(64, $atCap['availability_invocations']);
+        self::assertSame(200, $atCap['status']);
+        self::assertSame(['09:00'], $atCap['response']);
+
+        $this->createAdditionalProviders(1);
+        $overCap = $this->measure($nearDate, ANY_PROVIDER);
+        self::assertSame(0, $overCap['availability_invocations']);
+        self::assertSame(429, $overCap['status']);
+        self::assertSame(
+            [
+                'success' => false,
+                'message' => lang('requested_hour_is_unavailable'),
+            ],
+            $overCap['response'],
+        );
+    }
+
+    /** @return array{availability_invocations:int,response:array,status:int} */
     private function measure(
         string $selectedDate,
         string $providerId,
@@ -124,6 +166,8 @@ final class BookingAvailableHoursFutureLimitTest extends ApplicationTestCase
             'appointment_id' => $appointmentId,
         ];
         $_SERVER['REQUEST_METHOD'] = 'GET';
+        $this->testOutput->statusCode = 200;
+        $this->testOutput->set_status_header(200);
         get_instance()->output->set_output('');
 
         $availability = new class extends Availability {
@@ -150,6 +194,7 @@ final class BookingAvailableHoursFutureLimitTest extends ApplicationTestCase
         return [
             'availability_invocations' => $availability->invocations,
             'response' => $response,
+            'status' => $this->testOutput->statusCode,
         ];
     }
 
@@ -262,6 +307,34 @@ final class BookingAvailableHoursFutureLimitTest extends ApplicationTestCase
         ]);
 
         return (int) $CI->db->insert_id();
+    }
+
+    private function createAdditionalProviders(int $count): void
+    {
+        $CI = &get_instance();
+        $role = $CI->db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])->row_array();
+        $source = $CI->db->get_where('users', ['id_roles' => $role['id']])->row_array();
+        $settings = $CI->db->get_where('user_settings', ['id_users' => $source['id']])->row_array();
+
+        for ($index = 0; $index < $count; $index++) {
+            $provider = $source;
+            unset($provider['id']);
+            $provider['first_name'] = 'ROB727-Cap';
+            $provider['last_name'] = 'Provider-' . count($this->providerIds);
+            $provider['email'] = 'rob727-cap-' . bin2hex(random_bytes(8)) . '@synthetic.invalid';
+            $provider['id_roles'] = (int) $role['id'];
+            $CI->db->insert('users', $provider);
+            $id = (int) $CI->db->insert_id();
+            $this->providerIds[] = $id;
+            if ($settings) {
+                $copy = $settings;
+                unset($copy['id']);
+                $copy['id_users'] = $id;
+                $copy['username'] = 'rob727-cap-' . bin2hex(random_bytes(8));
+                $CI->db->insert('user_settings', $copy);
+            }
+            $CI->db->insert('services_providers', ['id_users' => $id, 'id_services' => $this->serviceId]);
+        }
     }
 
     private function cleanupSyntheticFixture(): void

@@ -24,6 +24,7 @@
 class Booking extends EA_Controller
 {
     private const MAX_UNAVAILABLE_DATES_PROVIDER_DAY_WORK = 512;
+    private const MAX_AVAILABLE_HOURS_ANY_PROVIDER_WORK = 64;
 
     private const CUSTOMER_TOKEN_CACHE_PREFIX = 'customer-token-v2-';
     public Reschedule_authority $reschedule_authority;
@@ -1086,6 +1087,24 @@ class Booking extends EA_Controller
 
             if ($provider_id === ANY_PROVIDER) {
                 $providers = $this->providers_model->get_available_providers(true);
+
+                $service_provider_count = count(
+                    array_filter(
+                        $providers,
+                        static fn(array $provider): bool => in_array($service_id, $provider['services']),
+                    ),
+                );
+                if ($service_provider_count > self::MAX_AVAILABLE_HOURS_ANY_PROVIDER_WORK) {
+                    json_response(
+                        [
+                            'success' => false,
+                            'message' => lang('requested_hour_is_unavailable'),
+                        ],
+                        429,
+                    );
+
+                    return;
+                }
 
                 $available_hours = [];
 
