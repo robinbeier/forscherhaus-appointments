@@ -23,10 +23,16 @@ server-issued authority has been verified. Shared networks share these limits.
 No extra CAPTCHA, email verification or invitation requirement is introduced.
 
 The early limiter now keeps a bounded, prefix-scoped admission ledger and
-rejects new addresses once a bucket is full. This bounds new key creation but
-does not retroactively remove legacy cache pairs from earlier releases. Any
-legacy expired-pair cleanup must run as a separate, locked, expired-only
-operator action with its own inventory and rollback evidence.
+replaces the oldest active entry when a bucket is full. Each bucket also has a
+per-window accepted-request budget of `64 × max(4, per-IP request limit)`;
+requests beyond that budget receive `429`, while `503` remains reserved for
+storage, lock, integrity or write failures. Existing full client-IP cache keys
+are preserved, so distributed and IPv6-/64 address churn remains a residual
+capacity risk rather than a verified family identity control. This bounds key
+state and request volume but does not retroactively remove legacy cache pairs
+from earlier releases. Any legacy expired-pair cleanup must run as a separate,
+locked, expired-only operator action with its own inventory and rollback
+evidence.
 
 ## Future public customers and consents
 
