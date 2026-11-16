@@ -107,9 +107,9 @@ if python3 "$VERIFY" --handoff "$workspace/last_backup_set.json" --manifest "$wo
     fail 'compressed size mismatch accepted'
 fi
 
-verify_line="$(grep -nE '^    verify_downloaded_backup$' "$ROOT_DIR/scripts/import_prod_backup.sh" | cut -d: -f1)"
-backup_line="$(grep -nE '^    backup_local_mysql_dir$' "$ROOT_DIR/scripts/import_prod_backup.sh" | cut -d: -f1)"
-reset_line="$(grep -nE '^    reset_and_import_local_database$' "$ROOT_DIR/scripts/import_prod_backup.sh" | cut -d: -f1)"
-(( verify_line < backup_line && verify_line < reset_line )) || fail 'verification is not ordered before destructive local steps'
+grep -Fq 'Production dump import is suspended' "$ROOT_DIR/scripts/import_prod_backup.sh" ||
+    fail 'importer suspension marker missing'
+grep -Fq 'no SSH, SCP, Docker, database, or filesystem import implementation' \
+    "$ROOT_DIR/scripts/import_prod_backup.sh" || fail 'suspension contract missing'
 
 printf 'import_prod_backup_attestation=passed\n'
