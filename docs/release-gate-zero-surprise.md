@@ -214,6 +214,14 @@ Pre-switch order in `deploy_ea.sh`:
 8. validate the generated predeploy report
 9. continue with stage preparation and `perform_atomic_switch`
 
+The isolated replay overlay uses the exact digest-pinned MariaDB image declared
+by the verified production-dump attestor
+(`scripts/ops/libexec/deployment_dump_attestation_v1.py`). Its `MARIADB_*`
+variables are set in the overlay so the replay import follows the restore
+engine's generated-column semantics. The overlay remains isolated by its
+dedicated volume and project name; this does not change the production database
+image or the atomic switch safeguards.
+
 For the post-switch and rollback sequence, follow
 [the deployment guide](deployment.md#deploy).
 

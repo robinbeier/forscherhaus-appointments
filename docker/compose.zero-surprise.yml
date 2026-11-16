@@ -1,5 +1,11 @@
 services:
   mysql:
+    image: 'mariadb@sha256:2f2b6bbcdbaf88afe53b76cb8d73927b623559180c5ab15db2049736f32ec590'
+    environment:
+      MARIADB_ROOT_PASSWORD: secret
+      MARIADB_DATABASE: easyappointments
+      MARIADB_USER: user
+      MARIADB_PASSWORD: password
     volumes:
       - zero_surprise_mysql_data:/var/lib/mysql
     ports: !reset []
