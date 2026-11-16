@@ -84,6 +84,7 @@ class ZeroSurpriseReportTest extends TestCase
 
         $this->assertSame($outputPath, $writtenPath);
         $this->assertFileExists($outputPath);
+        $this->assertSame(0600, fileperms($outputPath) & 0777);
 
         $raw = file_get_contents($outputPath);
         $this->assertIsString($raw);
@@ -95,6 +96,51 @@ class ZeroSurpriseReportTest extends TestCase
         $this->assertSame('pass', $decoded['invariants']['fill_rate_math']['status']);
 
         @unlink($outputPath);
+    }
+
+    public function testWriteRejectsPreexistingSymlinkWithoutTouchingTarget(): void
+    {
+        $directory = sys_get_temp_dir() . '/zero-surprise-report-symlink-' . bin2hex(random_bytes(4));
+        mkdir($directory, 0700, true);
+        $targetPath = $directory . '/target.json';
+        $outputPath = $directory . '/report.json';
+        file_put_contents($targetPath, 'sentinel');
+        symlink($targetPath, $outputPath);
+
+        $report = new ZeroSurpriseReport(
+            'ea_20260305_1200',
+            'zs-ea-20260305110000-a1b2',
+            ['base_url' => 'http://nginx'],
+            $outputPath,
+        );
+
+        $this->expectException(\RuntimeException::class);
+        try {
+            $report->write();
+        } finally {
+            $this->assertSame('sentinel', file_get_contents($targetPath));
+            unlink($outputPath);
+            unlink($targetPath);
+            rmdir($directory);
+        }
+    }
+
+    public function testReportKeepsPrivateEvidenceParentAndFileModes(): void
+    {
+        $directory = sys_get_temp_dir() . '/zero-surprise-report-private-' . bin2hex(random_bytes(4));
+        $evidenceDirectory = $directory . '/evidence';
+        $outputPath = $evidenceDirectory . '/report.json';
+        $report = new ZeroSurpriseReport('ea_20260305_1200', 'zs-ea-20260305110000-a1b2', [], $outputPath);
+
+        try {
+            $report->write();
+            $this->assertSame(0700, fileperms($evidenceDirectory) & 0777);
+            $this->assertSame(0600, fileperms($outputPath) & 0777);
+        } finally {
+            @unlink($outputPath);
+            @rmdir($evidenceDirectory);
+            @rmdir($directory);
+        }
     }
 
     private function createReport(): ZeroSurpriseReport

@@ -47,7 +47,7 @@ composer release:gate:booking-confirmation-pdf -- \
   - `output/playwright/booking-confirmation-pdf/<UTC>`
 - `--headed` (optional flag/bool): Run browser headed for debugging.
 - `--output-json` (optional): Report path. Default:
-  - `storage/logs/release-gate/booking-confirmation-pdf-<UTC>.json`
+  - `.release-gate/booking-confirmation-pdf-<UTC>.json` (root-owned deployment evidence)
 
 ## Assertions
 

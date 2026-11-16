@@ -28,7 +28,7 @@ final class KumaPushRuntimeBundleTest extends TestCase
 
         $files = $manifest['files'] ?? null;
         self::assertIsArray($files);
-        self::assertCount(12, $files);
+        self::assertCount(13, $files);
         $sourcePaths = [];
         foreach ($files as $entry) {
             self::assertIsArray($entry);

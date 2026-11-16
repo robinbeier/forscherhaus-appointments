@@ -52,7 +52,7 @@
             "source": "scripts/release-gate/dashboard_release_gate.php",
             "install": "scripts/release-gate/dashboard_release_gate.php",
             "role": "pdf_gate",
-            "sha256": "4626995b14203a8345b6a802ec3d65311abcc32d0849ebfdff3db9d13becadfc"
+            "sha256": "f99ada41efc9dc19524bcc7b1b5de5fdc42330aea7642ee117e11ae98babd5a4"
         },
         {
             "source": "scripts/release-gate/lib/GateAssertions.php",
@@ -77,6 +77,12 @@
             "install": "scripts/release-gate/lib/ZeroSurpriseCanaryContext.php",
             "role": "pdf_gate_library",
             "sha256": "c17a6e65671198ed374b215447cb828922c2547fd0a023de2f221d1a91902d02"
+        },
+        {
+            "source": "scripts/release-gate/lib/SafeJsonReport.php",
+            "install": "scripts/release-gate/lib/SafeJsonReport.php",
+            "role": "pdf_gate_library",
+            "sha256": "c089ba4f3c0e93bb3319703e8c042e78a3590cda59aeef4d11d86b758a815ffc"
         }
     ]
 }

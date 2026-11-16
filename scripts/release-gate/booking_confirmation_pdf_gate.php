@@ -6,6 +6,7 @@ require_once __DIR__ . '/lib/GateAssertions.php';
 require_once __DIR__ . '/lib/GateProcessRunner.php';
 require_once __DIR__ . '/lib/BookingConfirmationRunCodeResult.php';
 require_once __DIR__ . '/lib/PlaywrightBrowserSelection.php';
+require_once __DIR__ . '/lib/SafeJsonReport.php';
 
 use ReleaseGate\GateAssertionException;
 use ReleaseGate\GateAssertions;
@@ -14,6 +15,7 @@ use function ReleaseGate\buildPlaywrightSessionArguments;
 use function ReleaseGate\extractPlaywrightErrorSection;
 use function ReleaseGate\parseBookingConfirmationRunCodeResult;
 use function ReleaseGate\prepareConfiguredPlaywrightCommandArguments;
+use ReleaseGate\SafeJsonReport;
 
 const RELEASE_GATE_EXIT_SUCCESS = 0;
 const RELEASE_GATE_EXIT_ASSERTION_FAILURE = 1;
@@ -28,7 +30,7 @@ $cleanupWarnings = [];
 
 $repoRoot = dirname(__DIR__, 2);
 $timestamp = gmdate('Ymd\THis\Z');
-$defaultOutputPath = $repoRoot . '/storage/logs/release-gate/booking-confirmation-pdf-' . $timestamp . '.json';
+$defaultOutputPath = $repoRoot . '/.release-gate/booking-confirmation-pdf-' . $timestamp . '.json';
 $defaultArtifactsDir = $repoRoot . '/output/playwright/booking-confirmation-pdf/' . $timestamp;
 $defaultPwcliPath = resolveDefaultPwcliPath($repoRoot);
 $downloadSnippetPath = __DIR__ . '/playwright/booking_confirmation_download.js';
@@ -893,18 +895,7 @@ function writeTextFile(string $path, string $content): void
  */
 function writeJsonReport(string $path, array $report): void
 {
-    $directory = dirname($path);
-    ensureDirectory($directory);
-
-    $json = json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-
-    if ($json === false) {
-        throw new RuntimeException('Could not encode release gate report as JSON.');
-    }
-
-    if (file_put_contents($path, $json . PHP_EOL) === false) {
-        throw new RuntimeException('Could not write release gate report to: ' . $path);
-    }
+    SafeJsonReport::write($path, $report);
 }
 
 function resolveDefaultPwcliPath(string $repoRoot): string
