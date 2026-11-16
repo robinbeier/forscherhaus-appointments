@@ -150,6 +150,222 @@ final class AccountPasswordChangeHttpTest extends TestCase
         self::assertStringNotContainsString($this->fixture->run . '_new_alias', $serverLog);
     }
 
+    public function testStaleSessionVersionCannotSaveAfterConcurrentCredentialChange(): void
+    {
+        self::assertNotNull($this->fixture);
+        self::assertNotNull($this->server);
+
+        $admin = $this->login($this->server->client(), $this->credentials['password']);
+        $db = get_instance()->db;
+        $payload = $this->accountPayload($this->actorBefore, $this->actorSettingsBefore);
+        $payload['first_name'] = $this->fixture->run . '_must-not-persist';
+        $payload['settings']['username'] = $this->fixture->run . '_concurrent-rename';
+        $token = $admin->getCookie('csrf_cookie');
+        self::assertNotNull($token);
+        $cookies = $admin->cookies();
+        $cookieHeader = implode('; ', array_map(
+            static fn(string $name, string $value): string => $name . '=' . $value,
+            array_keys($cookies),
+            array_values($cookies),
+        ));
+        $observer = get_instance()->load->database(
+            [
+                'hostname' => 'mysql',
+                'username' => 'root',
+                'password' => 'secret',
+                'database' => 'easyappointments',
+                'dbdriver' => 'mysqli',
+                'dbprefix' => $db->dbprefix,
+                'pconnect' => false,
+                'db_debug' => false,
+                'char_set' => 'utf8mb4',
+                'dbcollat' => 'utf8mb4_general_ci',
+            ],
+            true,
+        );
+        self::assertTrue($observer->query('SET SESSION TRANSACTION READ ONLY'));
+        $multi = curl_multi_init();
+        $handle = null;
+        $transactionOpen = false;
+
+        try {
+            $ownerId = mysqli_thread_id($db->conn_id);
+            self::assertNotSame($ownerId, mysqli_thread_id($observer->conn_id));
+            self::assertTrue($db->trans_begin());
+            $transactionOpen = true;
+            self::assertNotFalse(
+                $db->query(
+                    'SELECT * FROM `' . $db->dbprefix('users') . '` WHERE `id` = ' .
+                    (int) $this->fixture->actorId . ' FOR UPDATE',
+                ),
+            );
+
+            $handle = curl_init($this->server->baseUrl . '/account/save');
+            self::assertInstanceOf(CurlHandle::class, $handle);
+            curl_setopt_array($handle, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => http_build_query(
+                    ['account' => $payload, 'csrf_token' => $token],
+                    '',
+                    '&',
+                    PHP_QUERY_RFC3986,
+                ),
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_TIMEOUT => 15,
+                CURLOPT_HTTPHEADER => [
+                    'Content-Type: application/x-www-form-urlencoded',
+                    'Cookie: ' . $cookieHeader,
+                ],
+            ]);
+            self::assertSame(CURLM_OK, curl_multi_add_handle($multi, $handle));
+            self::assertTrue($this->waitsForAccountActorLock($multi, $observer, $ownerId));
+
+            self::assertTrue(
+                (bool) $db->update('user_settings', ['username' => $payload['settings']['username']], [
+                    'id_users' => $this->fixture->actorId,
+                ]),
+            );
+            self::assertTrue(
+                (bool) $db->set('credential_version', 'credential_version + 1', false)
+                    ->where('id', $this->fixture->actorId)
+                    ->update('users'),
+            );
+            self::assertTrue($db->trans_commit());
+            $transactionOpen = false;
+
+            self::assertTrue($this->drainAccountRequest($multi, $handle));
+            self::assertSame(500, (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE));
+            self::assertSame(
+                $this->actorBefore['first_name'],
+                $this->fixture->row('users', $this->fixture->actorId)['first_name'],
+                'A stale session must not persist an account mutation after the concurrent rename.',
+            );
+            self::assertSame(403, $admin->get('account')->statusCode);
+        } finally {
+            if ($transactionOpen && $db->trans_active()) {
+                $db->trans_rollback();
+            }
+            if ($handle instanceof CurlHandle) {
+                $this->drainAccountRequest($multi, $handle);
+                curl_multi_remove_handle($multi, $handle);
+                curl_close($handle);
+            }
+            curl_multi_close($multi);
+            $observer->close();
+        }
+    }
+
+    public function testAuthenticatedSelfUsernameRenameAdvancesVersionAndKeepsSessionValid(): void
+    {
+        self::assertNotNull($this->fixture);
+        self::assertNotNull($this->server);
+
+        $admin = $this->login($this->server->client(), $this->credentials['password']);
+        $beforeVersion = (int) ($this->actorBefore['credential_version'] ?? 0);
+        $newUsername = $this->fixture->run . '_renamed_actor';
+        $account = $this->accountPayload($this->actorBefore, $this->actorSettingsBefore);
+        $account['settings']['username'] = $newUsername;
+
+        $saved = $admin->post('account/save', ['account' => $account]);
+
+        self::assertSame(200, $saved->statusCode, $saved->body);
+        self::assertSame(
+            $beforeVersion + 1,
+            (int) ($this->fixture->row('users', $this->fixture->actorId)['credential_version'] ?? 0),
+        );
+        self::assertSame($newUsername, $this->fixture->userSettingsRow($this->fixture->actorId)['username']);
+        self::assertSame(200, $admin->get('account')->statusCode);
+        self::assertFalse(
+            $this->loginResult($this->server->client(), $this->credentials['admin_username'], $this->credentials['password']),
+            'The old username must stop authenticating after a self-rename.',
+        );
+        self::assertTrue(
+            $this->loginResult($this->server->client(), $newUsername, $this->credentials['password']),
+            'The renamed username must authenticate with the unchanged password.',
+        );
+    }
+
+    public function testAccountSaveUsesPersistedUsernameAfterExternalUsernameChangeWithoutVersionBump(): void
+    {
+        self::assertNotNull($this->fixture);
+        self::assertNotNull($this->server);
+
+        $admin = $this->login($this->server->client(), $this->credentials['password']);
+        $newUsername = $this->fixture->run . '_external_username';
+        $db = get_instance()->db;
+        $beforeVersion = (int) ($this->fixture->row('users', $this->fixture->actorId)['credential_version'] ?? 0);
+        self::assertTrue(
+            (bool) $db->update('user_settings', ['username' => $newUsername], [
+                'id_users' => $this->fixture->actorId,
+            ]),
+        );
+
+        self::assertSame(200, $admin->get('account')->statusCode);
+        $payload = $this->accountPayload($this->actorBefore, $this->actorSettingsBefore);
+        $payload['settings']['username'] = $newUsername;
+        $payload['first_name'] = $this->fixture->run . '_external_username_save';
+        $saved = $admin->post('account/save', ['account' => $payload]);
+
+        self::assertSame(200, $saved->statusCode, $saved->body);
+        self::assertSame($newUsername, $this->fixture->userSettingsRow($this->fixture->actorId)['username']);
+        self::assertSame(
+            $this->fixture->run . '_external_username_save',
+            $this->fixture->row('users', $this->fixture->actorId)['first_name'],
+        );
+        self::assertSame(
+            $beforeVersion,
+            (int) ($this->fixture->row('users', $this->fixture->actorId)['credential_version'] ?? 0),
+            'A save with the already-persisted username must not fabricate a credential-version bump.',
+        );
+        self::assertSame(200, $admin->get('account')->statusCode);
+    }
+
+    private function waitsForAccountActorLock(CurlMultiHandle $multi, object $observer, int $ownerId): bool
+    {
+        $deadline = microtime(true) + 8;
+        do {
+            self::assertSame(CURLM_OK, curl_multi_exec($multi, $running));
+            $result = $observer->query(
+                'SELECT l.OBJECT_NAME, COALESCE(s.SQL_TEXT, r.PROCESSLIST_INFO) AS statement_text ' .
+                'FROM performance_schema.data_lock_waits w ' .
+                'JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID ' .
+                'JOIN performance_schema.threads b ON b.THREAD_ID = w.BLOCKING_THREAD_ID ' .
+                'JOIN performance_schema.threads r ON r.THREAD_ID = w.REQUESTING_THREAD_ID ' .
+                'LEFT JOIN performance_schema.events_statements_current s ON s.THREAD_ID = r.THREAD_ID ' .
+                'WHERE b.PROCESSLIST_ID = ' . $ownerId,
+            );
+            self::assertNotFalse($result);
+            foreach ($result->result_array() as $row) {
+                $sql = strtoupper((string) preg_replace('/\s+/', ' ', str_replace('`', '', trim((string) $row['statement_text']))));
+                if ($row['OBJECT_NAME'] === $observer->dbprefix('users') && str_contains($sql, 'FOR UPDATE') && str_contains($sql, 'CREDENTIAL_VERSION')) {
+                    return true;
+                }
+            }
+            if ($running === 0) {
+                return false;
+            }
+            curl_multi_select($multi, 0.05);
+        } while (microtime(true) < $deadline);
+        return false;
+    }
+
+    private function drainAccountRequest(CurlMultiHandle $multi, CurlHandle $handle): bool
+    {
+        $deadline = microtime(true) + 8;
+        do {
+            if (curl_multi_exec($multi, $running) !== CURLM_OK) {
+                return false;
+            }
+            if ($running === 0) {
+                return curl_errno($handle) === CURLE_OK;
+            }
+            curl_multi_select($multi, 0.05);
+        } while (microtime(true) < $deadline);
+        return false;
+    }
+
     public function testInvalidPasswordValuesAreRejectedOnBothAccountSaveAliasesWithoutMutation(): void
     {
         self::assertNotNull($this->fixture);

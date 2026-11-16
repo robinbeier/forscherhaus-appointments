@@ -121,10 +121,6 @@ class Users_model extends EA_Model
             }
 
             $user_id = empty($user['id']) ? $this->insert($user) : $this->update($user);
-            if ($this->last_saved_credential_version === null) {
-                $this->last_saved_credential_version = $this->current_credential_version($user_id);
-            }
-
             if ($owns_transaction && !$this->db->trans_commit()) {
                 throw new RuntimeException('Could not commit user save transaction.');
             }
@@ -301,6 +297,18 @@ class Users_model extends EA_Model
         $user['update_datetime'] = date('Y-m-d H:i:s');
 
         $settings = $user['settings'];
+        $current_settings = $this->db
+            ->query(
+                'SELECT `username` FROM `' . $this->db->dbprefix('user_settings') . '` WHERE `id_users` = ? FOR UPDATE',
+                [$user['id']],
+            )
+            ->row_array();
+        if (empty($current_settings)) {
+            throw new RuntimeException('Could not read user settings before update.');
+        }
+        $username_changed =
+            array_key_exists('username', $settings) &&
+            (string) $settings['username'] !== (string) ($current_settings['username'] ?? '');
         unset($user['settings'], $user['credential_version']);
 
         $ldap_dn_changed =
@@ -328,7 +336,7 @@ class Users_model extends EA_Model
 
         $this->set_settings($user['id'], $settings);
 
-        if ($password_changed || $ldap_dn_changed) {
+        if ($password_changed || $ldap_dn_changed || $username_changed) {
             $this->bump_credential_version((int) $user['id']);
         }
 

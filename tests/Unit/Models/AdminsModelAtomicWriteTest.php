@@ -147,6 +147,7 @@ final class AdminsModelAtomicWriteTest extends TestCase
         $adminId = $this->adminsModel->save($admin);
         $this->createdUserIds[] = $adminId;
         $stored = $this->adminsModel->find($adminId);
+        $this->assertSame(0, (int) get_instance()->db->get_where('users', ['id' => $adminId])->row('credential_version'));
         $this->assertSame('Atomic admin', $stored['first_name']);
         $this->assertSame('atomic-notes', $stored['notes']);
         $this->assertSame($admin['settings']['username'], $stored['settings']['username']);
@@ -190,6 +191,37 @@ final class AdminsModelAtomicWriteTest extends TestCase
         $this->adminsModel->save($stale);
 
         self::assertSame($before + 1, (int) $db->get_where('users', ['id' => $adminId])->row('credential_version'));
+    }
+
+    public function test_username_change_bumps_credential_version(): void
+    {
+        $adminId = $this->adminsModel->save($this->adminData());
+        $this->createdUserIds[] = $adminId;
+        $db = get_instance()->db;
+        $before = (int) $db->get_where('users', ['id' => $adminId])->row('credential_version');
+        $changed = $this->adminsModel->find($adminId);
+        $changed['settings']['username'] = 'admin-rename-' . bin2hex(random_bytes(4));
+
+        $this->adminsModel->save($changed);
+
+        self::assertSame($before + 1, (int) $db->get_where('users', ['id' => $adminId])->row('credential_version'));
+        self::assertSame(
+            $changed['settings']['username'],
+            (string) $db->get_where('user_settings', ['id_users' => $adminId])->row('username'),
+        );
+    }
+
+    public function test_unchanged_username_does_not_bump_credential_version(): void
+    {
+        $adminId = $this->adminsModel->save($this->adminData());
+        $this->createdUserIds[] = $adminId;
+        $db = get_instance()->db;
+        $before = (int) $db->get_where('users', ['id' => $adminId])->row('credential_version');
+        $unchanged = $this->adminsModel->find($adminId);
+
+        $this->adminsModel->save($unchanged);
+
+        self::assertSame($before, (int) $db->get_where('users', ['id' => $adminId])->row('credential_version'));
     }
 
     public function test_short_new_admin_password_is_rejected_before_mutation(): void

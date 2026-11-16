@@ -61,6 +61,7 @@ class Admins_model extends EA_Model
      */
     public function save(array $admin): int
     {
+        $this->last_saved_credential_version = null;
         if (
             !empty($admin['id']) &&
             isset($admin['settings']) &&
@@ -378,6 +379,18 @@ class Admins_model extends EA_Model
         $admin['id_roles'] = (int) $current_admin['id_roles'];
 
         $settings = $admin['settings'];
+        $current_settings = $this->db
+            ->query(
+                'SELECT `username` FROM `' . $this->db->dbprefix('user_settings') . '` WHERE `id_users` = ? FOR UPDATE',
+                [$admin['id']],
+            )
+            ->row_array();
+        if (empty($current_settings)) {
+            throw new RuntimeException('Could not read admin settings before update.');
+        }
+        $username_changed =
+            array_key_exists('username', $settings) &&
+            (string) $settings['username'] !== (string) ($current_settings['username'] ?? '');
 
         $settings['id_users'] = $admin['id'];
 
@@ -415,7 +428,7 @@ class Admins_model extends EA_Model
         }
 
         $this->set_settings($admin['id'], $settings);
-        if ($password_changed || $ldap_dn_changed) {
+        if ($password_changed || $ldap_dn_changed || $username_changed) {
             $this->bump_credential_version((int) $admin['id']);
         }
 
