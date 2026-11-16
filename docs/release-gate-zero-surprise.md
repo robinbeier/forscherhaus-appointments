@@ -81,6 +81,12 @@ before the dump is imported. A missing digest or identity mismatch fails the
 replay before any dump bytes reach MySQL. The dump itself remains governed by
 the separate restore-dump evidence contract.
 
+The replay loads `docker/compose.zero-surprise-replay.yml` only for this
+isolated restore path. It pins the database to the same MariaDB image used by
+the production dump attestor. The general `docker/compose.zero-surprise.yml`
+overlay deliberately does not replace the normal MySQL service, so ordinary
+CI fixtures continue to exercise the supported application database.
+
 Required keys:
 
 - `base_url`

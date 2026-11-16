@@ -83,7 +83,7 @@ final class BuildReleasePublicationContractTest extends TestCase
         self::assertStringContainsString('base="${child##*/}"', $script);
         self::assertStringContainsString('rm -rf -- "$child"', $script);
         self::assertStringContainsString(
-            'prune_children_except "$STAGE/docker" \'compose.zero-surprise.yml\' \'php-fpm\' \'nginx\'',
+            'prune_children_except "$STAGE/docker" \'compose.zero-surprise.yml\' \'compose.zero-surprise-replay.yml\' \'php-fpm\' \'nginx\'',
             $script,
         );
         self::assertStringContainsString('prune_children_except "$STAGE/docker/nginx" \'nginx.conf\'', $script);

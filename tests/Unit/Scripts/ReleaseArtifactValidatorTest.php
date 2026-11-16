@@ -93,6 +93,17 @@ final class ReleaseArtifactValidatorTest extends TestCase
         self::assertSame([$path], ReleaseArtifactValidator::missingArchivePaths($entries));
     }
 
+    public function testRequiredPathsIncludeBothZeroSurpriseComposeOverlays(): void
+    {
+        foreach (['docker-compose.yml', 'docker/compose.zero-surprise.yml', 'docker/compose.zero-surprise-replay.yml'] as $path) {
+            self::assertContains($path, ReleaseArtifactValidator::requiredPaths());
+            $entries = array_values(
+                array_filter($this->completeStaticRequiredPaths(), static fn(string $entry): bool => $entry !== $path),
+            );
+            self::assertSame([$path], ReleaseArtifactValidator::missingArchivePaths($entries));
+        }
+    }
+
     public function testRequiredPathsCoverCompleteCustomersUiSmokeRuntimeSurface(): void
     {
         $requiredPaths = ReleaseArtifactValidator::requiredPaths();

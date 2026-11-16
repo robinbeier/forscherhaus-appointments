@@ -14,7 +14,7 @@ class ZeroSurpriseReplayTest extends TestCase
 {
     public function testReplayOverlayUsesVerifiedMariaDbRestoreImageAndCredentials(): void
     {
-        $overlay = (string) file_get_contents(dirname(__DIR__, 3) . '/docker/compose.zero-surprise.yml');
+        $overlay = (string) file_get_contents(dirname(__DIR__, 3) . '/docker/compose.zero-surprise-replay.yml');
         $restoreVerifier = (string) file_get_contents(
             dirname(__DIR__, 3) . '/scripts/ops/libexec/deployment_dump_attestation_v1.py',
         );
@@ -26,7 +26,10 @@ class ZeroSurpriseReplayTest extends TestCase
         self::assertStringContainsString('MARIADB_DATABASE: easyappointments', $overlay);
         self::assertStringContainsString('MARIADB_USER: user', $overlay);
         self::assertStringContainsString('MARIADB_PASSWORD: password', $overlay);
-        self::assertStringContainsString('zero_surprise_mysql_data:/var/lib/mysql', $overlay);
+        self::assertStringNotContainsString('build:', $overlay);
+        $generalOverlay = (string) file_get_contents(dirname(__DIR__, 3) . '/docker/compose.zero-surprise.yml');
+        self::assertStringContainsString('zero_surprise_mysql_data:/var/lib/mysql', $generalOverlay);
+        self::assertStringContainsString('ports: !reset []', $generalOverlay);
     }
 
     public function testHttpReadinessDiagnosticsRetainOnlyNumericFailureOutcomes(): void
@@ -246,6 +249,8 @@ class ZeroSurpriseReplayTest extends TestCase
                 'docker-compose.yml',
                 '-f',
                 'docker/compose.zero-surprise.yml',
+                '-f',
+                'docker/compose.zero-surprise-replay.yml',
                 'down',
                 '-v',
                 '--remove-orphans',

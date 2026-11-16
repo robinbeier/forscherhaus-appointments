@@ -157,7 +157,7 @@ if [[ "$DRYRUN" -eq 0 ]]; then
   # Zero-surprise replays on the deployment host shell into docker compose
   # using the root compose file plus the dedicated override. Keep only the
   # runtime docker assets required for that flow, not local container data.
-  prune_children_except "$STAGE/docker" 'compose.zero-surprise.yml' 'php-fpm' 'nginx'
+  prune_children_except "$STAGE/docker" 'compose.zero-surprise.yml' 'compose.zero-surprise-replay.yml' 'php-fpm' 'nginx'
   prune_children_except "$STAGE/docker/nginx" 'nginx.conf'
 
   # Compiled frontend outputs are intentionally ignored by Git, so the exact
@@ -195,7 +195,7 @@ if [[ "$DRYRUN" -eq 0 ]]; then
   rm -f -- "$GENERATED_ASSET_LIST"
 else
   echo "[DRY-RUN] rsync Projekt → Stage (excl. /config.php, /storage, /build, /.git, /.DS_Store, /node_modules, /vendor, /easyappointments-*.zip, /tests, /docs, /docker)"
-  echo "[DRY-RUN] Würde docker/compose.zero-surprise.yml sowie docker/php-fpm und docker/nginx/nginx.conf gezielt ins Stage kopieren"
+  echo "[DRY-RUN] Würde die Zero-Surprise-Compose-Overlays sowie docker/php-fpm und docker/nginx/nginx.conf gezielt ins Stage kopieren"
   echo "[DRY-RUN] Würde das vollständige, aus Commit-Quellen und Vendor-Vertrag abgeleitete Runtime-Assetmanifest ins Stage kopieren"
 fi
 
