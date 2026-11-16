@@ -177,7 +177,7 @@ class ZeroSurpriseReplayTest extends TestCase
             $result = runMigration074PredeployGate(['docker', 'compose'], '/repo', $runner);
 
             self::assertSame('fail', $result['status']);
-            self::assertSame(2, $result['exit_code']);
+            self::assertSame(ZERO_SURPRISE_EXIT_ASSERTION_FAILURE, $result['exit_code']);
         }
     }
 
@@ -211,7 +211,7 @@ class ZeroSurpriseReplayTest extends TestCase
         $result = runMigration074PredeployGate(['docker', 'compose'], '/repo', $runner);
 
         self::assertSame('fail', $result['status']);
-        self::assertSame(70, $result['exit_code']);
+        self::assertSame(ZERO_SURPRISE_EXIT_RUNTIME_ERROR, $result['exit_code']);
         self::assertStringNotContainsString('private database detail', json_encode($result, JSON_THROW_ON_ERROR));
     }
 

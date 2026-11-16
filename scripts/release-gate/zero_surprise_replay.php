@@ -1674,8 +1674,8 @@ function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $confi
 
 /**
  * Run the migration-074 rehearsal only for a verified 073 baseline. A state
- * query failure is fail-closed; an already newer schema keeps the ordinary
- * predeploy path unchanged.
+ * query failure is fail-closed; a structurally valid version-074 schema keeps
+ * the ordinary predeploy path unchanged.
  *
  * @return array{status:string,exit_code:int,substeps:array<int,array<string,mixed>>}
  */
@@ -1693,7 +1693,7 @@ function runMigration074PredeployGate(array $composePrefix, string $repoRoot, ?c
         return [
             'status' => ZeroSurpriseReport::STATUS_FAIL,
             'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
-            'substeps' => $substeps,
+            'substeps' => sanitizePredeployMigrationSubsteps($substeps),
         ];
     }
 
@@ -1710,7 +1710,7 @@ function runMigration074PredeployGate(array $composePrefix, string $repoRoot, ?c
         return [
             'status' => ZeroSurpriseReport::STATUS_PASS,
             'exit_code' => ZERO_SURPRISE_EXIT_SUCCESS,
-            'substeps' => $substeps,
+            'substeps' => sanitizePredeployMigrationSubsteps($substeps),
         ];
     }
 
@@ -1718,7 +1718,7 @@ function runMigration074PredeployGate(array $composePrefix, string $repoRoot, ?c
         return [
             'status' => ZeroSurpriseReport::STATUS_FAIL,
             'exit_code' => ZERO_SURPRISE_EXIT_ASSERTION_FAILURE,
-            'substeps' => $substeps,
+            'substeps' => sanitizePredeployMigrationSubsteps($substeps),
         ];
     }
 
@@ -1726,7 +1726,7 @@ function runMigration074PredeployGate(array $composePrefix, string $repoRoot, ?c
         return [
             'status' => ZeroSurpriseReport::STATUS_FAIL,
             'exit_code' => ZERO_SURPRISE_EXIT_ASSERTION_FAILURE,
-            'substeps' => $substeps,
+            'substeps' => sanitizePredeployMigrationSubsteps($substeps),
         ];
     }
 
@@ -1734,7 +1734,7 @@ function runMigration074PredeployGate(array $composePrefix, string $repoRoot, ?c
     return [
         'status' => $rehearsal['status'],
         'exit_code' => $rehearsal['exit_code'],
-        'substeps' => array_merge($substeps, $rehearsal['substeps']),
+        'substeps' => sanitizePredeployMigrationSubsteps(array_merge($substeps, $rehearsal['substeps'])),
     ];
 }
 
