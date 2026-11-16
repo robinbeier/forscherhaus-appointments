@@ -129,9 +129,11 @@ hashes of the relevant synthetic database tables. General Settings retains its
 existing permission-error response (500 with an explicit failure message);
 this is distinct from the staff controllers' 403 response.
 
-The ordinary updater tests cover confirmation GET/HEAD and a valid POST on an
-already current disposable installation. They do not execute a pending migration
-or establish rollback safety. These cases are a bounded matrix, not every role,
+The ordinary updater tests cover read-only guidance on GET, an accepted HEAD
+without a response body, and rejection of authorized POST, including an already
+current disposable installation. They verify unchanged migration tracking but
+do not exercise a pending CLI migration or establish rollback safety. These
+cases are a bounded matrix, not every role,
 method, credential or update/destroy payload combination.
 
 `ProviderPdfExportHttpTest` uses real loopback HTTP sessions and two synthetic
