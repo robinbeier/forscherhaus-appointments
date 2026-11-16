@@ -121,7 +121,8 @@ class ZeroSurpriseReplayTest extends TestCase
 
     public function testDiagnosticRestoreProjectionDropsEarlyFailurePathsAndOutput(): void
     {
-        $serialized = json_encode(sanitizeDiagnosticRestoreDetails([
+        $details = diagnosticRestoreReportDetails(['rehearse_migration_074' => true], [
+            'details' => [
             'failed_substep' => 'compose_up',
             'substeps' => [[
                 'name' => 'compose_up',
@@ -130,12 +131,19 @@ class ZeroSurpriseReplayTest extends TestCase
                 'command' => 'docker compose --dump-file=/secret/backup.sql',
                 'stderr_tail' => 'password=top-secret /private/path',
             ]],
-        ]), JSON_THROW_ON_ERROR);
+            ],
+        ]);
+        $report = new ZeroSurpriseReport('synthetic', 'zs-synthetic', [], '/tmp/synthetic.json', 'migration074-diagnostic');
+        $report->addStep('restore_dump', 'fail', 2, 1.0, ['details' => $details]);
+        $serialized = json_encode($report->toArray(), JSON_THROW_ON_ERROR);
 
         self::assertStringNotContainsString('/secret/backup.sql', $serialized);
         self::assertStringNotContainsString('top-secret', $serialized);
         self::assertStringContainsString('compose_up', $serialized);
         self::assertStringContainsString('"exit_code":2', $serialized);
+
+        $ordinary = diagnosticRestoreReportDetails(['rehearse_migration_074' => false], ['details' => ['command' => '/secret/backup.sql']]);
+        self::assertSame('/secret/backup.sql', $ordinary['command']);
     }
 
     public function testReplayOverlayUsesVerifiedMariaDbRestoreImageAndCredentials(): void

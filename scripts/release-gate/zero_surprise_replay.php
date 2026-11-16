@@ -81,9 +81,7 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
             $restoreStep['exit_code'],
             $restoreStep['duration_ms'],
             [
-                'details' => ($config['rehearse_migration_074'] ?? false) === true
-                    ? sanitizeDiagnosticRestoreDetails($restoreStep['details'])
-                    : $restoreStep['details'],
+                'details' => diagnosticRestoreReportDetails($config, $restoreStep),
             ],
         );
         $baselineBlockers = $restoreStep['baseline_blockers'] ?? null;
@@ -97,7 +95,7 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
                 $restoreStep['status'],
                 $restoreStep['exit_code'],
                 $restoreStep['duration_ms'],
-                ['details' => sanitizeDiagnosticRestoreDetails($restoreStep['details'])],
+                ['details' => diagnosticRestoreReportDetails($config, $restoreStep)],
             );
         } elseif ($restoreStep['status'] === ZeroSurpriseReport::STATUS_PASS) {
             $bookingCommand = composeCommand($composePrefix, [
@@ -2104,7 +2102,7 @@ function collectMigration074Invariants(array $restoreStep): array
 function sanitizeDiagnosticRestoreDetails(array $details): array
 {
     $safe = [];
-    foreach (['input_attestation', 'rehearsal', 'release_evidence', 'failed_substep', 'migration_invoked', 'subsequent_replay_steps', 'paused_after_restore'] as $key) {
+    foreach (['input_attestation', 'rehearsal', 'release_evidence', 'failed_substep'] as $key) {
         if (array_key_exists($key, $details) && is_scalar($details[$key])) {
             $safe[$key] = $details[$key];
         }
@@ -2136,6 +2134,15 @@ function sanitizeDiagnosticRestoreDetails(array $details): array
         }
     }
     return $safe;
+}
+
+/** @param array<string,mixed> $config @param array<string,mixed> $restoreStep @return array<string,mixed> */
+function diagnosticRestoreReportDetails(array $config, array $restoreStep): array
+{
+    $details = is_array($restoreStep['details'] ?? null) ? $restoreStep['details'] : [];
+    return ($config['rehearse_migration_074'] ?? false) === true
+        ? sanitizeDiagnosticRestoreDetails($details)
+        : $details;
 }
 
 /** @return array<string,array{status:string,details:array<string,mixed>}> */
