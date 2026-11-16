@@ -748,6 +748,9 @@ final class DeployStableResultTest extends TestCase
 
     public function testZeroSurpriseStageRuntimePreparesConfiguredRuntimeCacheDirectory(): void
     {
+        if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+            self::markTestSkipped('requires root-owned stage fixture');
+        }
         $result = $this->runShell(
             <<<'BASH'
             set -eu
@@ -771,8 +774,38 @@ final class DeployStableResultTest extends TestCase
         self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
     }
 
+    public function testZeroSurpriseStageRuntimePreparesCanaryEvidenceWhenReplayDisabled(): void
+    {
+        if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+            self::markTestSkipped('requires root-owned stage fixture');
+        }
+        $result = $this->runShell(
+            <<<'BASH'
+            set -eu
+            fixture="$(mktemp -d)"
+            trap 'rm -rf "$fixture"' EXIT
+            source ./deploy_ea.sh
+            STAGE_ROOT="$fixture/stage"
+            REQUIRE_ZERO_SURPRISE=0
+            ZERO_SURPRISE_CANARY_ENABLED=1
+            DRYRUN=0
+            mkdir -p "$STAGE_ROOT"
+            prepare_zero_surprise_stage_runtime
+            test -d "$STAGE_ROOT/.release-gate"
+            test ! -L "$STAGE_ROOT/.release-gate"
+            test "$(stat -c '%a' "$STAGE_ROOT/.release-gate")" = 700
+            BASH
+            ,
+        );
+
+        self::assertSame(0, $result['exit_code'], $result['stdout'] . $result['stderr']);
+    }
+
     public function testZeroSurpriseStageRuntimeCreatesAllPhpStartupStorageDirectories(): void
     {
+        if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+            self::markTestSkipped('requires root-owned stage fixture');
+        }
         $result = $this->runShell(
             <<<'BASH'
             set -eu

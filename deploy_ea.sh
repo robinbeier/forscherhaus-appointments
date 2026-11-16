@@ -2120,13 +2120,27 @@ prepare_zero_surprise_stage_runtime() {
   stage_config="$STAGE_ROOT/config.php"
   stage_sample="$STAGE_ROOT/config-sample.php"
 
-  if [[ "$REQUIRE_ZERO_SURPRISE" -ne 1 ]]; then
+  if [[ "$REQUIRE_ZERO_SURPRISE" -ne 1 && "$ZERO_SURPRISE_CANARY_ENABLED" -ne 1 ]]; then
     return 0
   fi
 
   if [[ "$DRYRUN" -eq 1 ]]; then
     echo "[DRY-RUN] would generate zero-surprise stage config from '$stage_sample' -> '$stage_config'"
     echo "[DRY-RUN] would prepare the stage's PHP-FPM runtime storage directories"
+    if [[ "$REQUIRE_ZERO_SURPRISE" -ne 1 ]]; then
+      echo "[DRY-RUN] would prepare root-owned private canary evidence directory '$STAGE_ROOT/.release-gate'"
+    fi
+    return 0
+  fi
+
+  evidence_root="$STAGE_ROOT/.release-gate"
+  if [[ "$REQUIRE_ZERO_SURPRISE" -ne 1 ]]; then
+    [[ ! -L "$evidence_root" ]] || return 1
+    [[ ! -e "$evidence_root" || -d "$evidence_root" ]] || return 1
+    mkdir -p "$evidence_root" >/dev/null 2>&1 || return $?
+    chown 0:0 "$evidence_root" >/dev/null 2>&1 || return $?
+    chmod 0700 "$evidence_root" >/dev/null 2>&1 || return $?
+    [[ "$(stat -c '%u:%g:%a' -- "$evidence_root" 2>/dev/null)" == 0:0:700 ]] || return 1
     return 0
   fi
 
