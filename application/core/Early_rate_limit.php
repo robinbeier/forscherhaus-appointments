@@ -4,6 +4,9 @@
 final class Early_rate_limit
 {
     private const TRACKING_CAPACITY_PER_BUCKET = 64;
+    // Keep the shared guard above the identity-ledger size so normal low-volume
+    // churn does not recreate the old 64-client denial threshold.
+    private const MIN_BUCKET_REQUEST_MULTIPLIER = 4;
 
     public static function enforce(
         string $ip,
@@ -42,12 +45,9 @@ final class Early_rate_limit
             $ledgerPath =
                 $cachePath . DIRECTORY_SEPARATOR . sprintf('rate_limit.ledger.%s.%02x', $ledgerScope, $bucket);
             $ledger = self::readLedger($ledgerPath, $now, $keyPrefix, $remainPrefix);
+            $bucketBudget = self::loadBucketBudget($cachePath, $ledgerScope, $bucket, $duration, $maxRequests, $now);
             $entryPath = $cachePath . DIRECTORY_SEPARATOR . $cacheKey;
-            if (!array_key_exists($cacheKey, $ledger)) {
-                if (count($ledger) >= self::TRACKING_CAPACITY_PER_BUCKET) {
-                    self::failClosed();
-                }
-            }
+            $newIdentity = !array_key_exists($cacheKey, $ledger);
             $entry = self::read($cachePath . DIRECTORY_SEPARATOR . $cacheKey, $now);
             $remain = self::read($cachePath . DIRECTORY_SEPARATOR . $remainKey, $now);
             if ($entry === null && (file_exists($entryPath) || is_link($entryPath))) {
@@ -86,7 +86,16 @@ final class Early_rate_limit
                     $count = $entry + 1;
                 }
             }
-            $ledger[$cacheKey] = $now + max(2, $duration * 2);
+            $trackIdentity = !$newIdentity || $count <= $maxRequests;
+            if ($count <= $maxRequests) {
+                self::recordBucketRequest($duration, $bucketBudget);
+            }
+            if ($trackIdentity) {
+                if ($newIdentity && count($ledger) >= self::TRACKING_CAPACITY_PER_BUCKET) {
+                    self::replaceOldest($ledger, $cachePath, $keyPrefix, $remainPrefix);
+                }
+                $ledger[$cacheKey] = $now + max(2, $duration * 2);
+            }
             if (
                 !self::write($ledgerPath, $ledger, max(2, $duration * 2)) ||
                 !self::write($cachePath . DIRECTORY_SEPARATOR . $cacheKey, $count, $duration) ||
@@ -102,6 +111,90 @@ final class Early_rate_limit
             header('Retry-After: ' . max(1, $window - time()));
             header('HTTP/1.0 429 Too Many Requests');
             exit();
+        }
+    }
+
+    /** @param array<string,int> $ledger */
+    private static function replaceOldest(
+        array &$ledger,
+        string $cachePath,
+        string $keyPrefix,
+        string $remainPrefix,
+    ): void
+    {
+        $oldestKey = null;
+        $oldestExpiry = PHP_INT_MAX;
+        foreach ($ledger as $key => $expires) {
+            if ($expires < $oldestExpiry) {
+                $oldestKey = $key;
+                $oldestExpiry = $expires;
+            }
+        }
+        if ($oldestKey === null) {
+            self::failClosed();
+        }
+        if (!str_starts_with($oldestKey, $keyPrefix)) {
+            self::failClosed();
+        }
+        $suffix = substr($oldestKey, strlen($keyPrefix));
+        foreach (
+            [$cachePath . DIRECTORY_SEPARATOR . $oldestKey, $cachePath . DIRECTORY_SEPARATOR . $remainPrefix . $suffix]
+            as $path
+        ) {
+            if (is_link($path) || is_dir($path) || (is_file($path) && !@unlink($path))) {
+                self::failClosed();
+            }
+        }
+        unset($ledger[$oldestKey]);
+    }
+
+    /** @return array{path:string,window:int,requests:int,budget:int} */
+    private static function loadBucketBudget(
+        string $cachePath,
+        string $ledgerScope,
+        int $bucket,
+        int $duration,
+        int $maxRequests,
+        int $now,
+    ): array {
+        $path = $cachePath . DIRECTORY_SEPARATOR . sprintf('rate_limit.bucket.%s.%02x', $ledgerScope, $bucket);
+        $state = self::read($path, $now);
+        if ($state === null) {
+            $state = ['window' => $now + $duration, 'requests' => 0];
+        }
+        if (
+            !is_array($state) ||
+            !isset($state['window'], $state['requests']) ||
+            !is_int($state['window']) ||
+            !is_int($state['requests']) ||
+            $state['window'] <= 0 ||
+            $state['requests'] < 0
+        ) {
+            self::failClosed();
+        }
+        if ($now >= $state['window']) {
+            $state = ['window' => $now + $duration, 'requests' => 0];
+        }
+        $budget = self::TRACKING_CAPACITY_PER_BUCKET * max(self::MIN_BUCKET_REQUEST_MULTIPLIER, $maxRequests);
+        if ($state['requests'] >= $budget) {
+            header('Retry-After: ' . max(1, $state['window'] - $now));
+            header('HTTP/1.0 429 Too Many Requests');
+            exit();
+        }
+        return ['path' => $path, 'window' => $state['window'], 'requests' => $state['requests'], 'budget' => $budget];
+    }
+
+    /** @param array{path:string,window:int,requests:int,budget:int} $budget */
+    private static function recordBucketRequest(
+        int $duration,
+        array $budget,
+    ): void {
+        $state = ['window' => $budget['window'], 'requests' => $budget['requests'] + 1];
+        if ($state['requests'] > $budget['budget']) {
+            self::failClosed();
+        }
+        if (!self::write($budget['path'], $state, max(2, $duration * 2))) {
+            self::failClosed();
         }
     }
 

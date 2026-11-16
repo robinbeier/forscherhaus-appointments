@@ -88,7 +88,7 @@ final class EarlyRateLimitTest extends TestCase
         self::assertSame(503, $this->worker());
     }
 
-    public function testNewAddressesAreBoundedPerBucketWithoutDirectoryScan(): void
+    public function testNewAddressesReplaceOldestEntryWithoutExceedingBucketCapacity(): void
     {
         $addresses = [];
         $bucket = null;
@@ -109,8 +109,85 @@ final class EarlyRateLimitTest extends TestCase
         foreach (array_slice($addresses, 0, 64) as $ip) {
             self::assertSame(200, $this->workerForIp($ip));
         }
-        self::assertSame(503, $this->workerForIp($addresses[64]));
+        self::assertSame(200, $this->workerForIp($addresses[64]));
         self::assertCount(1, glob($this->directory . '/rate_limit.ledger.*') ?: []);
+        self::assertCount(64, unserialize(file_get_contents($this->ledgerPath($addresses[0])), ['allowed_classes' => false])['data']);
+    }
+
+    public function testDistinctLowVolumeIdentitiesCanChurnBeyondLedgerCapacity(): void
+    {
+        $addresses = [];
+        $bucket = null;
+        for ($first = 0; $first < 256 && count($addresses) < 129; $first++) {
+            for ($second = 1; $second < 256 && count($addresses) < 129; $second++) {
+                $ip = '198.18.' . $first . '.' . $second;
+                $candidate = hexdec(substr(hash('sha256', 'rate_limit_key_' . $ip), 0, 8)) % 64;
+                $bucket ??= $candidate;
+                if ($candidate === $bucket) {
+                    $addresses[] = $ip;
+                }
+            }
+        }
+        self::assertCount(129, $addresses);
+        foreach ($addresses as $ip) {
+            self::assertSame(200, $this->workerForIp($ip));
+        }
+    }
+
+    public function testBucketRequestBudgetStopsHighVolumeBeforeEviction(): void
+    {
+        $ip = '203.0.113.10';
+        file_put_contents(
+            $this->bucketPath($ip),
+            serialize(['time' => time(), 'ttl' => 120, 'data' => ['window' => time() + 60, 'requests' => 255]]),
+        );
+        $bucket = hexdec(substr(hash('sha256', 'rate_limit_key_' . $ip), 0, 8)) % 64;
+        $otherIp = null;
+        for ($last = 1; $last < 255; $last++) {
+            $candidate = '203.0.113.' . $last;
+            if ($candidate !== $ip && hexdec(substr(hash('sha256', 'rate_limit_key_' . $candidate), 0, 8)) % 64 === $bucket) {
+                $otherIp = $candidate;
+                break;
+            }
+        }
+        self::assertNotNull($otherIp);
+        self::assertSame(200, $this->workerForIp($ip, 1, 1));
+        self::assertSame(429, $this->workerForIp($otherIp, 1, 1));
+    }
+
+    public function testOverQuotaUntrackedLegacyIdentityDoesNotGrowFullLedger(): void
+    {
+        $ip = '203.0.113.10';
+        $bucket = hexdec(substr(hash('sha256', 'rate_limit_key_' . $ip), 0, 8)) % 64;
+        $entries = [];
+        for ($first = 0; count($entries) < 64 && $first < 256; $first++) {
+            for ($second = 1; count($entries) < 64 && $second < 256; $second++) {
+                $candidate = '198.19.' . $first . '.' . $second;
+                if (hexdec(substr(hash('sha256', 'rate_limit_key_' . $candidate), 0, 8)) % 64 === $bucket) {
+                    $entries['rate_limit_key_' . $candidate] = time() + 120;
+                }
+            }
+        }
+        self::assertCount(64, $entries);
+        file_put_contents(
+            $this->ledgerPath($ip),
+            serialize(['time' => time(), 'ttl' => 120, 'data' => $entries]),
+        );
+        $this->seed('rate_limit_key_', 1);
+        $this->seed('rate_limit_tmp_', time() + 60, 120);
+        self::assertSame(429, $this->workerForIp($ip, 1, 1));
+        $ledger = unserialize(file_get_contents($this->ledgerPath($ip)), ['allowed_classes' => false]);
+        self::assertCount(64, $ledger['data']);
+        self::assertArrayNotHasKey('rate_limit_key_' . $ip, $ledger['data']);
+    }
+
+    public function testMalformedBucketAdmissionStateFailsClosed(): void
+    {
+        file_put_contents(
+            $this->bucketPath('203.0.113.10'),
+            serialize(['time' => time(), 'ttl' => 120, 'data' => ['unexpected' => true]]),
+        );
+        self::assertSame(503, $this->worker());
     }
 
     public function testExpiredLedgerEntriesArePrunedUnderBucketLock(): void
@@ -156,20 +233,31 @@ final class EarlyRateLimitTest extends TestCase
         self::assertGreaterThan($oldExpiry, $ledger['data']['rate_limit_key_' . $ip]);
     }
 
-    public function testLegacyFileCannotBypassFullLedgerCap(): void
+    public function testFullLedgerReplacesOldestLegacyEntry(): void
     {
         $ip = '203.0.113.10';
         $ledgerPath = $this->ledgerPath($ip);
         $entries = [];
-        for ($index = 0; $index < 64; $index++) {
-            $entries['rate_limit_key_198.51.0.' . $index] = time() + 120;
+        $bucket = hexdec(substr(hash('sha256', 'rate_limit_key_' . $ip), 0, 8)) % 64;
+        for ($first = 0; count($entries) < 64 && $first < 256; $first++) {
+            for ($second = 1; count($entries) < 64 && $second < 256; $second++) {
+                $candidate = '198.51.' . $first . '.' . $second;
+                if (hexdec(substr(hash('sha256', 'rate_limit_key_' . $candidate), 0, 8)) % 64 === $bucket) {
+                    $entries['rate_limit_key_' . $candidate] = time() + 120;
+                }
+            }
         }
+        self::assertCount(64, $entries);
         file_put_contents($ledgerPath, serialize(['time' => time(), 'ttl' => 120, 'data' => $entries]));
         file_put_contents(
             $this->directory . '/rate_limit_key_' . $ip,
             serialize(['time' => time(), 'ttl' => 60, 'data' => 1]),
         );
-        self::assertSame(503, $this->workerForIp($ip));
+        file_put_contents(
+            $this->directory . '/rate_limit_tmp_' . $ip,
+            serialize(['time' => time(), 'ttl' => 120, 'data' => time() + 60]),
+        );
+        self::assertSame(200, $this->workerForIp($ip));
     }
 
     public function testMalformedLedgerFailsClosed(): void
@@ -288,6 +376,14 @@ final class EarlyRateLimitTest extends TestCase
         $scope = substr(hash('sha256', $keyPrefix . "\0" . $remainPrefix), 0, 8);
 
         return $this->directory . '/rate_limit.ledger.' . $scope . '.' . sprintf('%02x', $bucket);
+    }
+
+    private function bucketPath(string $ip): string
+    {
+        $bucket = hexdec(substr(hash('sha256', 'rate_limit_key_' . $ip), 0, 8)) % 64;
+        $scope = substr(hash('sha256', "rate_limit_key_\0rate_limit_tmp_"), 0, 8);
+
+        return $this->directory . '/rate_limit.bucket.' . $scope . '.' . sprintf('%02x', $bucket);
     }
 
     private function worker(int $calls = 1, int $limit = 2): int
