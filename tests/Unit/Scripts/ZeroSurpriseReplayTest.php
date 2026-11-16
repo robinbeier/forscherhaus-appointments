@@ -12,6 +12,26 @@ require_once __DIR__ . '/../../../scripts/release-gate/zero_surprise_replay.php'
 
 class ZeroSurpriseReplayTest extends TestCase
 {
+    public function testReplayOverlayUsesVerifiedMariaDbRestoreImageAndCredentials(): void
+    {
+        $overlay = (string) file_get_contents(dirname(__DIR__, 3) . '/docker/compose.zero-surprise-replay.yml');
+        $restoreVerifier = (string) file_get_contents(
+            dirname(__DIR__, 3) . '/scripts/ops/libexec/deployment_dump_attestation_v1.py',
+        );
+        self::assertSame(1, preg_match("/^IMAGE = '([^']+)'$/m", $restoreVerifier, $restoreMatch));
+
+        self::assertSame(1, preg_match("/image:\s*'([^']+)'/", $overlay, $overlayMatch));
+        self::assertSame($restoreMatch[1] ?? null, $overlayMatch[1] ?? null);
+        self::assertStringContainsString('MARIADB_ROOT_PASSWORD: secret', $overlay);
+        self::assertStringContainsString('MARIADB_DATABASE: easyappointments', $overlay);
+        self::assertStringContainsString('MARIADB_USER: user', $overlay);
+        self::assertStringContainsString('MARIADB_PASSWORD: password', $overlay);
+        self::assertStringNotContainsString('build:', $overlay);
+        $generalOverlay = (string) file_get_contents(dirname(__DIR__, 3) . '/docker/compose.zero-surprise.yml');
+        self::assertStringContainsString('zero_surprise_mysql_data:/var/lib/mysql', $generalOverlay);
+        self::assertStringContainsString('ports: !reset []', $generalOverlay);
+    }
+
     public function testHttpReadinessDiagnosticsRetainOnlyNumericFailureOutcomes(): void
     {
         self::assertSame(
@@ -229,6 +249,8 @@ class ZeroSurpriseReplayTest extends TestCase
                 'docker-compose.yml',
                 '-f',
                 'docker/compose.zero-surprise.yml',
+                '-f',
+                'docker/compose.zero-surprise-replay.yml',
                 'down',
                 '-v',
                 '--remove-orphans',

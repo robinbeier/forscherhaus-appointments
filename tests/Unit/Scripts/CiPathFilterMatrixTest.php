@@ -355,6 +355,7 @@ class CiPathFilterMatrixTest extends TestCase
     {
         return [
             'isolated replay compose overlay' => ['docker/compose.zero-surprise.yml'],
+            'isolated replay database overlay' => ['docker/compose.zero-surprise-replay.yml'],
             'dashboard export controller' => ['application/controllers/Dashboard_export.php'],
             'pdf renderer library' => ['application/libraries/Pdf_renderer.php'],
             'teacher pdf view' => ['application/views/exports/dashboard_teacher_pdf.php'],
@@ -402,6 +403,7 @@ class CiPathFilterMatrixTest extends TestCase
             'docker/compose.ci-local.yml',
             'docker/compose.php85-smoke.yml',
             'docker/compose.zero-surprise.yml',
+            'docker/compose.zero-surprise-replay.yml',
             'docker/php-fpm/Dockerfile',
             'docker/nginx/nginx.conf',
             'docker/ldap/seed/00-readonly-bind-user.ldif',

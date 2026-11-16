@@ -668,7 +668,18 @@ function buildRunId(string $releaseId): string
  */
 function composePrefix(string $project): array
 {
-    return ['docker', 'compose', '-p', $project, '-f', 'docker-compose.yml', '-f', 'docker/compose.zero-surprise.yml'];
+    return [
+        'docker',
+        'compose',
+        '-p',
+        $project,
+        '-f',
+        'docker-compose.yml',
+        '-f',
+        'docker/compose.zero-surprise.yml',
+        '-f',
+        'docker/compose.zero-surprise-replay.yml',
+    ];
 }
 
 /**
