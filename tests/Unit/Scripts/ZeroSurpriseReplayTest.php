@@ -119,6 +119,25 @@ class ZeroSurpriseReplayTest extends TestCase
         self::assertSame('predeploy', $normal->toArray()['meta']['mode']);
     }
 
+    public function testDiagnosticRestoreProjectionDropsEarlyFailurePathsAndOutput(): void
+    {
+        $serialized = json_encode(sanitizeDiagnosticRestoreDetails([
+            'failed_substep' => 'compose_up',
+            'substeps' => [[
+                'name' => 'compose_up',
+                'status' => 'fail',
+                'exit_code' => 2,
+                'command' => 'docker compose --dump-file=/secret/backup.sql',
+                'stderr_tail' => 'password=top-secret /private/path',
+            ]],
+        ]), JSON_THROW_ON_ERROR);
+
+        self::assertStringNotContainsString('/secret/backup.sql', $serialized);
+        self::assertStringNotContainsString('top-secret', $serialized);
+        self::assertStringContainsString('compose_up', $serialized);
+        self::assertStringContainsString('"exit_code":2', $serialized);
+    }
+
     public function testReplayOverlayUsesVerifiedMariaDbRestoreImageAndCredentials(): void
     {
         $overlay = (string) file_get_contents(dirname(__DIR__, 3) . '/docker/compose.zero-surprise-replay.yml');

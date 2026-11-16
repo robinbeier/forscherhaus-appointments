@@ -81,7 +81,9 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
             $restoreStep['exit_code'],
             $restoreStep['duration_ms'],
             [
-                'details' => $restoreStep['details'],
+                'details' => ($config['rehearse_migration_074'] ?? false) === true
+                    ? sanitizeDiagnosticRestoreDetails($restoreStep['details'])
+                    : $restoreStep['details'],
             ],
         );
         $baselineBlockers = $restoreStep['baseline_blockers'] ?? null;
@@ -95,7 +97,7 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
                 $restoreStep['status'],
                 $restoreStep['exit_code'],
                 $restoreStep['duration_ms'],
-                ['details' => $restoreStep['details']],
+                ['details' => sanitizeDiagnosticRestoreDetails($restoreStep['details'])],
             );
         } elseif ($restoreStep['status'] === ZeroSurpriseReport::STATUS_PASS) {
             $bookingCommand = composeCommand($composePrefix, [
@@ -2096,6 +2098,44 @@ function collectMigration074Invariants(array $restoreStep): array
             ],
         ],
     ];
+}
+
+/** @param array<string,mixed> $details @return array<string,mixed> */
+function sanitizeDiagnosticRestoreDetails(array $details): array
+{
+    $safe = [];
+    foreach (['input_attestation', 'rehearsal', 'release_evidence', 'failed_substep', 'migration_invoked', 'subsequent_replay_steps', 'paused_after_restore'] as $key) {
+        if (array_key_exists($key, $details) && is_scalar($details[$key])) {
+            $safe[$key] = $details[$key];
+        }
+    }
+    if (isset($details['substeps']) && is_array($details['substeps'])) {
+        $safe['substeps'] = [];
+        foreach ($details['substeps'] as $step) {
+            if (!is_array($step)) {
+                continue;
+            }
+            $projection = [];
+            foreach (['name', 'status', 'exit_code', 'duration_ms', 'category', 'attempts'] as $key) {
+                if (array_key_exists($key, $step) && is_scalar($step[$key])) {
+                    $projection[$key] = $step[$key];
+                }
+            }
+            if (isset($step['details']) && is_array($step['details'])) {
+                $aggregate = [];
+                foreach (['appointments_table', 'migrations_table', 'version', 'row_count', 'index_count', 'column', 'non_unique', 'seq_in_index', 'sub_part'] as $key) {
+                    if (array_key_exists($key, $step['details']) && is_scalar($step['details'][$key])) {
+                        $aggregate[$key] = $step['details'][$key];
+                    }
+                }
+                if ($aggregate !== []) {
+                    $projection['details'] = $aggregate;
+                }
+            }
+            $safe['substeps'][] = $projection;
+        }
+    }
+    return $safe;
 }
 
 /** @return array<string,array{status:string,details:array<string,mixed>}> */
