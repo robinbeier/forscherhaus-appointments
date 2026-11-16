@@ -58,14 +58,18 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
             'max_pdf_duration_ms' => $config['max_pdf_duration_ms'],
             'timezone' => $config['timezone'],
             'output_json' => $config['output_json'],
-            'input_attestation' => ($config['rehearse_migration_074'] ?? false) === true ? 'unverified' : 'not_applicable',
         ];
+        if (($config['rehearse_migration_074'] ?? false) === true) {
+            $reportConfig['input_attestation'] = 'unverified';
+            $reportConfig['release_evidence'] = false;
+        }
 
         $report = new ZeroSurpriseReport(
             $config['release_id'],
             $composeProject,
             $reportConfig,
             $config['output_json'],
+            ($config['rehearse_migration_074'] ?? false) === true ? 'migration074-diagnostic' : 'predeploy',
         );
 
         $composePrefix = composePrefix($composeProject);
@@ -345,7 +349,7 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
             );
         }
 
-        foreach (collectInvariants($bookingReport, $dashboardReport) as $name => $invariant) {
+        foreach (collectReplayInvariants($config, $restoreStep, $bookingReport, $dashboardReport) as $name => $invariant) {
             $report->addInvariant($name, $invariant['status'], $invariant['details']);
         }
 
@@ -375,7 +379,10 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
             );
         }
 
-        $report->setFailure($e->getMessage(), get_class($e), 'runtime_error');
+        $failureMessage = cliRequestsMigration074Rehearsal()
+            ? 'Migration-074 diagnostic input or setup was rejected.'
+            : $e->getMessage();
+        $report->setFailure($failureMessage, get_class($e), 'runtime_error');
         $exitCode = ZERO_SURPRISE_EXIT_RUNTIME_ERROR;
     }
 
@@ -509,6 +516,16 @@ function parseCliOptions(string $defaultOutputPath, string $defaultProfile): arr
         'output_json' => $outputJson,
         'rehearse_migration_074' => array_key_exists('rehearse-migration-074', $options),
     ];
+}
+
+function cliRequestsMigration074Rehearsal(): bool
+{
+    foreach (($GLOBALS['argv'] ?? []) as $argument) {
+        if ($argument === '--rehearse-migration-074') {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
@@ -2080,11 +2097,6 @@ function buildAppReadinessUrl(array $config): string
     return $baseUrl . '/' . $indexPage . '/login';
 }
 
-/**
- * @param array<string, mixed>|null $bookingReport
- * @param array<string, mixed>|null $dashboardReport
- * @return array<string, array{status:string,details:array<string, mixed>}>
- */
 /** @return array<string,array{status:string,details:array<string,mixed>}> */
 function collectMigration074Invariants(array $restoreStep): array
 {
@@ -2103,6 +2115,19 @@ function collectMigration074Invariants(array $restoreStep): array
     ];
 }
 
+/** @return array<string,array{status:string,details:array<string,mixed>}> */
+function collectReplayInvariants(array $config, array $restoreStep, ?array $bookingReport, ?array $dashboardReport): array
+{
+    return ($config['rehearse_migration_074'] ?? false) === true
+        ? collectMigration074Invariants($restoreStep)
+        : collectInvariants($bookingReport, $dashboardReport);
+}
+
+/**
+ * @param array<string, mixed>|null $bookingReport
+ * @param array<string, mixed>|null $dashboardReport
+ * @return array<string, array{status:string,details:array<string, mixed>}>
+ */
 function collectInvariants(?array $bookingReport, ?array $dashboardReport): array
 {
     return [

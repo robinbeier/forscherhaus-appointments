@@ -102,6 +102,21 @@ class ZeroSurpriseReplayTest extends TestCase
         self::assertFalse($invariants['migration_074_rehearsal']['details']['release_evidence']);
     }
 
+    public function testTopLevelInvariantSelectionUsesDiagnosticModeAndReportMode(): void
+    {
+        $selected = collectReplayInvariants(
+            ['rehearse_migration_074' => true],
+            ['status' => 'pass'],
+            null,
+            null,
+        );
+        self::assertArrayHasKey('migration_074_rehearsal', $selected);
+        self::assertArrayNotHasKey('overbooking', $selected);
+
+        $report = new ZeroSurpriseReport('synthetic', 'zs-synthetic', [], '/tmp/synthetic.json', 'migration074-diagnostic');
+        self::assertSame('migration074-diagnostic', $report->toArray()['mode']);
+    }
+
     public function testReplayOverlayUsesVerifiedMariaDbRestoreImageAndCredentials(): void
     {
         $overlay = (string) file_get_contents(dirname(__DIR__, 3) . '/docker/compose.zero-surprise-replay.yml');
