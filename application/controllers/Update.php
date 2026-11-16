@@ -35,56 +35,29 @@ class Update extends EA_Controller
     }
 
     /**
-     * This method will update the instance to the latest available version in the server.
-     *
-     * IMPORTANT: The code files must exist in the server, this method will not fetch any new files but will update
-     * the database schema.
-     *
-     * GET/HEAD display a confirmation page. Only an authorized POST, protected by
-     * the framework's CSRF verification, may initialize and run migrations.
+     * Explain the operator-only migration path to authorized users.
+     * Database migrations may change schema and data, so this web endpoint must
+     * never initiate them. Operators use the protected CLI release procedure.
      */
     public function index(): void
     {
-        try {
-            $user_id = (int) session('user_id');
+        $user_id = (int) session('user_id');
 
-            if (!$user_id || cannot('edit', PRIV_SYSTEM_SETTINGS, $user_id)) {
-                if ($user_id) {
-                    abort(403, 'Forbidden');
-                }
-
-                redirect('login');
-
-                return;
+        if (!$user_id || cannot('edit', PRIV_SYSTEM_SETTINGS, $user_id)) {
+            if ($user_id) {
+                abort(403, 'Forbidden');
             }
 
-            $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? ''));
+            redirect('login');
 
-            if ($method === 'POST') {
-                // Instance construction can initialize migration tracking. Keep it behind both guards.
-                $this->load->library('instance');
-                $this->instance->migrate();
-                $view = ['success' => true];
-            } elseif (in_array($method, ['GET', 'HEAD'], true)) {
-                $view = [
-                    'success' => null,
-                    'csrf_token_name' => $this->security->get_csrf_token_name(),
-                    'csrf_token' => $this->security->get_csrf_hash(),
-                ];
-            } else {
-                abort(405, 'Method Not Allowed', ['Allow: GET, HEAD, POST']);
-
-                return;
-            }
-        } catch (Throwable $e) {
-            if (function_exists('log_message')) {
-                log_message('error', 'Update migration failed: ' . get_class($e));
-            }
-
-            $view = ['success' => false];
+            return;
         }
 
-        html_vars($view);
+        if (!in_array(strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')), ['GET', 'HEAD'], true)) {
+            abort(405, 'Method Not Allowed', ['Allow: GET, HEAD']);
+
+            return;
+        }
 
         $this->load->view('pages/update');
     }

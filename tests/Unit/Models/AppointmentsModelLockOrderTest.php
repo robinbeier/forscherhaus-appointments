@@ -65,6 +65,64 @@ final class AppointmentsModelLockOrderTest extends TestCase
         $this->assertStringContainsString('FOR UPDATE', $database->queries[1]['sql']);
     }
 
+    public function testActorRoleHookRunsAfterAllUsersAndBeforeServices(): void
+    {
+        $database = new AppointmentsModelLockOrderFakeDatabase();
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+        $hookCalls = 0;
+
+        try {
+            $this->createModel()->lock_update_parents(
+                ['id_users_customer' => 30, 'id_users_provider' => 20, 'id_services' => 50],
+                ['id_users_customer' => 40, 'id_users_provider' => 20, 'id_services' => 30],
+                [10],
+                static function () use ($database, &$hookCalls): void {
+                    $hookCalls++;
+                    self::assertCount(1, $database->queries);
+                    self::assertSame([10, 20, 30, 40], $database->queries[0]['bindings']);
+                    self::assertStringContainsString('FROM `ea_users`', $database->queries[0]['sql']);
+                },
+            );
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        self::assertSame(1, $hookCalls);
+        self::assertCount(2, $database->queries);
+        self::assertStringContainsString('FROM `ea_services`', $database->queries[1]['sql']);
+    }
+
+    public function testActorRoleHookFailureStopsBeforeServiceLock(): void
+    {
+        $database = new AppointmentsModelLockOrderFakeDatabase();
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+
+        try {
+            try {
+                $this->createModel()->lock_update_parents(
+                    ['id_users_customer' => 30, 'id_services' => 50],
+                    [],
+                    [],
+                    static function (): void {
+                        throw new RuntimeException('Actor role unavailable.');
+                    },
+                );
+                self::fail('The role hook must fail before locking a service.');
+            } catch (RuntimeException $error) {
+                self::assertSame('Actor role unavailable.', $error->getMessage());
+            }
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        self::assertCount(1, $database->queries);
+        self::assertStringContainsString('FROM `ea_users`', $database->queries[0]['sql']);
+    }
+
     public function testUpdatePathLocksParentsBeforeAppointmentUpdate(): void
     {
         $database = new AppointmentsModelLockOrderFakeDatabase();

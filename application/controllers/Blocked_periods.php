@@ -381,7 +381,7 @@ class Blocked_periods extends EA_Controller
 
         $actor = $locked_actor->row_array();
 
-        return !empty($actor) && !cannot($action, PRIV_BLOCKED_PERIODS, $user_id);
+        return !empty($actor) && can_with_locked_role($action, PRIV_BLOCKED_PERIODS, $user_id);
     }
 
     private function backofficeRequestDtoFactory(): Backoffice_request_dto_factory

@@ -70,13 +70,16 @@ final class ApiMutationTransactionTest extends TestCase
         self::assertStringContainsString('FROM ea_users', $database->queries[0]['sql']);
         self::assertStringContainsString('FOR UPDATE', $database->queries[0]['sql']);
         self::assertSame([73], $database->queries[0]['bindings']);
+        self::assertStringContainsString('FROM ea_roles', $database->queries[1]['sql']);
+        self::assertStringContainsString('FOR UPDATE', $database->queries[1]['sql']);
+        self::assertSame([1], $database->queries[1]['bindings']);
     }
 
     public function testDemotionBeforeFinalCommitRollsBackAndReturnsUnauthorized(): void
     {
         $database = new ApiMutationTransactionDbDouble();
         $database->actorRow = ['id' => 73, 'id_roles' => 2];
-        $database->roleSlug = 'provider';
+        $database->roleRow = ['slug' => 'provider'];
         $api = $this->apiWithTransaction($database);
         $controller = (new ReflectionProperty(Api::class, 'CI'))->getValue($api);
         $controller->output = new ApiMutationTransactionOutputDouble();
@@ -88,6 +91,22 @@ final class ApiMutationTransactionTest extends TestCase
         self::assertSame(401, $controller->output->status);
         self::assertStringContainsString('WWW-Authenticate: Basic', $controller->output->headers[0]);
         self::assertStringNotContainsString('provider', $controller->output->body);
+    }
+
+    public function testMissingRoleBeforeFinalCommitRollsBackAndReturnsUnauthorized(): void
+    {
+        $database = new ApiMutationTransactionDbDouble();
+        $database->roleRow = [];
+        $api = $this->apiWithTransaction($database);
+        $controller = (new ReflectionProperty(Api::class, 'CI'))->getValue($api);
+        $controller->output = new ApiMutationTransactionOutputDouble();
+
+        $api->trackResponseStatus(200);
+        $api->finalizeMutationTransaction();
+
+        self::assertSame(0, $database->commits);
+        self::assertSame(1, $database->rollbacks);
+        self::assertSame(401, $controller->output->status);
     }
 
     public function testMissingActorBeforeFinalCommitRollsBackAndReturnsUnauthorized(): void
@@ -242,7 +261,7 @@ final class ApiMutationTransactionDbDouble
     /** @var list<array{sql:string,bindings:array<int,mixed>}> */
     public array $queries = [];
     public array $actorRow = ['id' => 73, 'id_roles' => 1, 'credential_version' => 0, 'password' => '', 'salt' => ''];
-    public string $roleSlug = DB_SLUG_ADMIN;
+    public array $roleRow = ['slug' => DB_SLUG_ADMIN];
     public string $settingValue = 'original-token';
 
     public function trans_begin(): bool
@@ -271,7 +290,7 @@ final class ApiMutationTransactionDbDouble
         } elseif (str_contains($sql, 'FROM ea_settings')) {
             $row = ['value' => $this->settingValue];
         } else {
-            $row = ['slug' => $this->roleSlug];
+            $row = $this->roleRow;
         }
         return new ApiMutationTransactionQueryDouble($row);
     }

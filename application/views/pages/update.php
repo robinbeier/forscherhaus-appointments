@@ -20,58 +20,12 @@
 <div class="container">
     <div class="row">
         <div class="col">
-            <?php if (vars('success') === null): ?>
-                <div class="jumbotron">
-                    <h1 class="display-4">Update database</h1>
-                    <p class="lead">
-                        Apply the database updates included in the installed version.
-                        Make sure a current database backup is available before continuing.
-                    </p>
-                    <form method="post" action="<?= site_url('update') ?>">
-                        <input type="hidden" name="<?= e(vars('csrf_token_name')) ?>"
-                               value="<?= e(vars('csrf_token')) ?>">
-                        <button type="submit" class="btn btn-primary btn-large">Update database</button>
-                    </form>
-                </div>
-            <?php elseif (vars('success')): ?>
-                <div class="jumbotron">
-                    <h1 class="display-4">Success!</h1>
-                    <p class="lead">
-                        The database got updated successfully.
-                    </p>
-                    <hr class="my-4">
-                    <p>
-                        You can now use the latest Easy!Appointments version.
-                    </p>
-                    <a href="<?= site_url('about') ?>" class="btn btn-success btn-large">
-                        <i class="fas fa-wrench me-2"></i>
-                        <?= lang('backend_section') ?>
-                    </a>
-                </div>
-            <?php else: ?>
-                <div class="jumbotron">
-                    <h1 class="display-4">Failure!</h1>
-                    <p class="lead">
-                        There was an error during the update process.
-                    </p>
-                    <hr class="my-4">
-                    <p>
-                        Please restore your database backup.
-                    </p>
-                    <a href="<?= site_url('login') ?>" class="btn btn-success btn-large">
-                        <i class="fas fa-wrench me-2"></i>
-                        <?= lang('backend_section') ?>
-                    </a>
-
-                    <p>
-                        Please restore your database backup.
-                    </p>
-                </div>
-
-                <div class="well text-start">
-                    Error Message: <?= e(vars('exception')) ?>
-                </div>
-            <?php endif; ?>
+            <div class="jumbotron">
+                <h1 class="display-4">Database updates</h1>
+                <p class="lead">
+                    Database updates are applied by the server operator during a planned release.
+                </p>
+            </div>
         </div>
     </div>
 </div>

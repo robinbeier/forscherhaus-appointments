@@ -10,12 +10,7 @@ use Tests\Integration\Support\DefenseCycleHttpServer;
 require_once dirname(__DIR__) . '/Support/DefenseCycleFixtures.php';
 require_once dirname(__DIR__) . '/Support/DefenseCycleHttpServer.php';
 
-/** Bounded HTTP/DB coverage for the migration-gated Update controller.
- *
- * The baseline deliberately never sends an authorized POST. On the unchanged
- * source that request reaches Instance::migrate(), so it is reserved for a
- * follow-up regression run after the authorization fix is present.
- */
+/** Bounded HTTP/DB coverage for the read-only Update controller. */
 final class UpdateLegacyHttpTest extends TestCase
 {
     private ?DefenseCycleFixtures $fixture = null;
@@ -96,7 +91,7 @@ final class UpdateLegacyHttpTest extends TestCase
         self::assertSame($before, $db->get('migrations')->result_array());
     }
 
-    public function testAuthorizedGetHeadAndNonPostMethodsOnlyRenderOrReject(): void
+    public function testAuthorizedPageIsReadOnlyAndEveryWriteMethodIsRejected(): void
     {
         $admin = $this->login($this->credentials['admin_username']);
         $db = get_instance()->db;
@@ -105,15 +100,18 @@ final class UpdateLegacyHttpTest extends TestCase
         foreach (['update', 'update/index'] as $path) {
             $get = $admin->get($path);
             self::assertSame(200, $get->statusCode, $path . ' ' . $get->body);
-            self::assertStringContainsString('<form method="post"', $get->body, $path);
-            self::assertStringContainsString('name="csrf_token"', $get->body, $path);
+            self::assertStringContainsString('applied by the server operator', $get->body, $path);
+            self::assertStringNotContainsString('<form', $get->body, $path);
 
             $head = $admin->requestApp('HEAD', $path);
             self::assertSame(200, $head->statusCode, 'HEAD ' . $path);
+            $post = $admin->post($path, [], withCsrfToken: true);
+            self::assertSame(405, $post->statusCode, 'POST ' . $path);
+            self::assertSame('GET, HEAD', $post->header('allow'), 'POST ' . $path);
             foreach (['PUT', 'PATCH', 'DELETE'] as $method) {
                 $response = $admin->requestApp($method, $path);
                 self::assertSame(405, $response->statusCode, $method . ' ' . $path);
-                self::assertSame('GET, HEAD, POST', $response->header('allow'), $method . ' ' . $path);
+                self::assertSame('GET, HEAD', $response->header('allow'), $method . ' ' . $path);
             }
         }
 
@@ -193,7 +191,8 @@ final class UpdateLegacyHttpTest extends TestCase
             foreach (['update', 'update/index'] as $path) {
                 $response = $provider->get($path);
                 self::assertSame(200, $response->statusCode, $path . ' ' . $response->body);
-                self::assertStringContainsString('<form method="post"', $response->body, $path);
+                self::assertStringContainsString('applied by the server operator', $response->body, $path);
+                self::assertStringNotContainsString('<form', $response->body, $path);
             }
         } finally {
             $providerRole = $db->get_where('roles', ['slug' => DB_SLUG_PROVIDER])->row_array();

@@ -642,10 +642,15 @@ class Calendar extends EA_Controller
         }
 
         $CI = &get_instance();
-        $CI->load->model('users_model');
-        $CI->load->model('roles_model');
-        $role_id = (int) $CI->users_model->value($user_id, 'id_roles');
-        $role_slug = (string) $CI->roles_model->value($role_id, 'slug');
+        if ($this->db->trans_active()) {
+            $role = lock_actor_role($user_id);
+            $role_slug = (string) ($role['slug'] ?? '');
+        } else {
+            $CI->load->model('users_model');
+            $CI->load->model('roles_model');
+            $role_id = (int) $CI->users_model->value($user_id, 'id_roles');
+            $role_slug = (string) $CI->roles_model->value($role_id, 'slug');
+        }
 
         return match ($role_slug) {
             DB_SLUG_ADMIN => true,
@@ -659,7 +664,10 @@ class Calendar extends EA_Controller
     {
         $user_id = (int) session('user_id');
 
-        return $user_id > 0 && can($action, $resource, $user_id);
+        return $user_id > 0 &&
+            ($this->db->trans_active()
+                ? can_with_locked_role($action, $resource, $user_id)
+                : can($action, $resource, $user_id));
     }
 
     protected function lock_calendar_update_parents(
@@ -671,6 +679,12 @@ class Calendar extends EA_Controller
             $current_appointment,
             $requested_appointment,
             $additional_user_ids,
+            static function (): void {
+                $user_id = (int) session('user_id');
+                if (lock_actor_role($user_id) === []) {
+                    throw new RuntimeException('You do not have the required permissions for this task.', 403);
+                }
+            },
         );
     }
 

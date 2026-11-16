@@ -78,7 +78,7 @@ final class DefenseCycleOrdinaryFlowTest extends TestCase
         self::assertSame([], $this->fixture->row('services', $this->fixture->serviceId));
     }
 
-    public function testOrdinaryUpdaterConfirmationAndCurrentVersionPost(): void
+    public function testOrdinaryUpdaterIsReadOnlyAndCannotRunMigrations(): void
     {
         $client = $this->server->client();
         self::assertSame(200, $client->get('login')->statusCode);
@@ -95,16 +95,16 @@ final class DefenseCycleOrdinaryFlowTest extends TestCase
         self::assertNotEmpty($before, 'Fresh install must already have migration tracking.');
         $confirmation = $client->get('update');
         self::assertSame(200, $confirmation->statusCode);
-        self::assertStringContainsString('<form method="post"', $confirmation->body);
-        self::assertStringContainsString('name="csrf_token"', $confirmation->body);
+        self::assertStringContainsString('applied by the server operator', $confirmation->body);
+        self::assertStringNotContainsString('<form', $confirmation->body);
         self::assertSame($before, $db->get('migrations')->result_array());
-        $updated = $client->post('update');
-        self::assertSame(200, $updated->statusCode);
-        self::assertStringContainsString('The database got updated successfully.', $updated->body);
+        $rejected = $client->post('update');
+        self::assertSame(405, $rejected->statusCode);
+        self::assertSame('GET, HEAD', $rejected->header('allow'));
         self::assertSame(
             $before,
             $db->get('migrations')->result_array(),
-            'Current-version update must remain current.',
+            'Rejected browser update must not change migration tracking.',
         );
     }
 

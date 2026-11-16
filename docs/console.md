@@ -27,6 +27,8 @@ php index.php console migrate
 ```
 
 This command will migrate the database to the latest state. 
+The browser `/update` page is read-only; production migrations use the
+separately authorized release procedure in [Deployment](deployment.md#production-database-migrations).
 
 ```
 php index.php console migrate fresh

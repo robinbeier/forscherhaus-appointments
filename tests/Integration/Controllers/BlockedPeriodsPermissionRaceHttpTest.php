@@ -20,6 +20,7 @@ final class BlockedPeriodsPermissionRaceHttpTest extends TestCase
     private ?array $customerRole = null;
     private int $periodId = 0;
     private ?int $actorRoleBefore = null;
+    private ?int $blockedPermissionBefore = null;
 
     protected function setUp(): void
     {
@@ -33,6 +34,9 @@ final class BlockedPeriodsPermissionRaceHttpTest extends TestCase
             $this->credentials = $this->fixture->enableProviderHttpAuth();
             $db = get_instance()->db;
             $this->actorRoleBefore = (int) ($this->fixture->row('users', $this->fixture->actorId)['id_roles'] ?? 0);
+            $role = $db->get_where('roles', ['id' => $this->actorRoleBefore])->row_array();
+            self::assertNotEmpty($role);
+            $this->blockedPermissionBefore = (int) $role['blocked_periods'];
             $this->customerRole = $db->get_where('roles', ['slug' => DB_SLUG_CUSTOMER])->row_array();
             self::assertNotEmpty($this->customerRole);
             $this->server = new DefenseCycleHttpServer();
@@ -52,9 +56,61 @@ final class BlockedPeriodsPermissionRaceHttpTest extends TestCase
     {
         try {
             $this->server?->close();
+            $this->restoreBlockedPermission();
             $this->restoreActorRole();
         } finally {
             $this->fixture?->cleanup();
+        }
+    }
+
+    public function testSharedRoleRevocationBeforeRoleLockDeniesStoreWithoutMutation(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        self::assertNotNull($this->actorRoleBefore);
+        $admin = $this->login($this->credentials['admin_username']);
+        $payload = $fixture->blockedPeriodWritePayload('role-bit-race-store');
+        $db = get_instance()->db;
+        $observer = $this->observer($db);
+        $multi = curl_multi_init();
+        $handle = null;
+        $transactionOpen = false;
+
+        try {
+            $ownerId = mysqli_thread_id($db->conn_id);
+            self::assertNotSame($ownerId, mysqli_thread_id($observer->conn_id));
+            self::assertTrue($db->trans_begin());
+            $transactionOpen = true;
+            self::assertNotFalse($db->query(
+                'SELECT `id` FROM `' . $db->dbprefix('roles') . '` WHERE `id` = ? FOR UPDATE',
+                [$this->actorRoleBefore],
+            ));
+
+            $handle = $this->startRequest($admin, 'blocked_periods/store', ['blocked_period' => $payload], $multi);
+            self::assertTrue($this->waitsForRoleLock($multi, $observer, $ownerId, $this->actorRoleBefore));
+            self::assertTrue((bool) $db->update(
+                'roles',
+                ['blocked_periods' => PRIV_VIEW],
+                ['id' => $this->actorRoleBefore],
+            ));
+            self::assertTrue($db->trans_commit());
+            $transactionOpen = false;
+
+            self::assertTrue($this->drain($multi, $handle));
+            self::assertSame(403, (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE));
+            self::assertSame(0, $db->get_where('blocked_periods', ['name' => $payload['name']])->num_rows());
+        } finally {
+            if ($transactionOpen && $db->trans_active()) {
+                $db->trans_rollback();
+            }
+            if ($handle instanceof CurlHandle) {
+                $this->drain($multi, $handle);
+                curl_multi_remove_handle($multi, $handle);
+                curl_close($handle);
+            }
+            curl_multi_close($multi);
+            $observer->close();
+            $db->delete('blocked_periods', ['name' => $payload['name']]);
         }
     }
 
@@ -252,6 +308,29 @@ final class BlockedPeriodsPermissionRaceHttpTest extends TestCase
         return false;
     }
 
+    private function waitsForRoleLock(CurlMultiHandle $multi, object $observer, int $ownerId, int $roleId): bool
+    {
+        $deadline = microtime(true) + 8;
+        do {
+            self::assertSame(CURLM_OK, curl_multi_exec($multi, $running));
+            self::assertNotFalse($result = $observer->query(
+                'SELECT l.OBJECT_NAME, COALESCE(s.SQL_TEXT, r.PROCESSLIST_INFO) AS statement_text FROM performance_schema.data_lock_waits w JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID JOIN performance_schema.threads b ON b.THREAD_ID = w.BLOCKING_THREAD_ID JOIN performance_schema.threads r ON r.THREAD_ID = w.REQUESTING_THREAD_ID LEFT JOIN performance_schema.events_statements_current s ON s.THREAD_ID = r.THREAD_ID WHERE b.PROCESSLIST_ID = ' . $ownerId,
+            ));
+            foreach ($result->result_array() as $row) {
+                $sql = strtoupper((string) preg_replace('/\s+/', ' ', str_replace('`', '', trim((string) $row['statement_text']))));
+                if ($row['OBJECT_NAME'] === $observer->dbprefix('roles') &&
+                    str_contains($sql, 'FOR UPDATE') && str_contains($sql, (string) $roleId)) {
+                    return true;
+                }
+            }
+            if ($running === 0) {
+                return false;
+            }
+            curl_multi_select($multi, 0.05);
+        } while (microtime(true) < $deadline);
+        return false;
+    }
+
     private function drain(CurlMultiHandle $multi, CurlHandle $handle): bool
     {
         $deadline = microtime(true) + 8;
@@ -274,6 +353,17 @@ final class BlockedPeriodsPermissionRaceHttpTest extends TestCase
                 'users',
                 ['id_roles' => $this->actorRoleBefore],
                 ['id' => $this->fixture->actorId],
+            );
+        }
+    }
+
+    private function restoreBlockedPermission(): void
+    {
+        if ($this->actorRoleBefore !== null && $this->blockedPermissionBefore !== null) {
+            get_instance()->db->update(
+                'roles',
+                ['blocked_periods' => $this->blockedPermissionBefore],
+                ['id' => $this->actorRoleBefore],
             );
         }
     }

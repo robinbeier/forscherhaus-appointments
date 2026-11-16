@@ -62,7 +62,7 @@ Key files:
 
 ### `installation-bootstrap` - Installation & Bootstrap
 
-CLI installation, test-data bootstrap, and authenticated web updater.
+CLI installation, test-data bootstrap, and read-only web migration guidance.
 
 Dependencies:
 - `people-services-admin`

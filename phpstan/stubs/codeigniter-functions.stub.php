@@ -58,6 +58,17 @@ function cannot(string $action, string $resource, ?int $user_id = null): bool
     return false;
 }
 
+/** @return array<string, mixed> */
+function lock_actor_role(int $user_id): array
+{
+    return [];
+}
+
+function can_with_locked_role(string $action, string $resource, int $user_id): bool
+{
+    return false;
+}
+
 /**
  * @param mixed $var
  *

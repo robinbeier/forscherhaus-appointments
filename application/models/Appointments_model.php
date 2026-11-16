@@ -710,6 +710,7 @@ class Appointments_model extends EA_Model
         array $current_appointment,
         array $requested_appointment,
         array $additional_user_ids = [],
+        ?callable $after_user_locks = null,
     ): void {
         $user_ids = $this->sorted_parent_ids([
             $current_appointment['id_users_customer'] ?? null,
@@ -724,6 +725,12 @@ class Appointments_model extends EA_Model
         ]);
 
         $this->lock_parent_rows('users', 'id', $user_ids);
+        // A caller may reserve the actor's role after every user parent but
+        // before any service/appointment lock. The callback must only lock and
+        // validate that role; it must not mutate or acquire later-level rows.
+        if ($after_user_locks !== null) {
+            $after_user_locks();
+        }
         $this->lock_parent_rows('services', 'id', $service_ids);
     }
 

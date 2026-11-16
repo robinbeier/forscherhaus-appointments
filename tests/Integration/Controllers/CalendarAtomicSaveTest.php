@@ -137,7 +137,8 @@ class CalendarAtomicSaveTest extends TestCase
             };
             $controller->appointments_model = new class {
                 private array $appointment;
-                public function lock_update_parents(array $current, array $requested, array $additional = []): void {}
+                // This isolated model double does not model database lock scheduling.
+                public function lock_update_parents(array $current, array $requested, array $additional = [], ?callable $afterUsers = null): void {}
                 public function only(array &$record, array $fields): void {}
                 public function optional(array &$record, array $fields): void {}
                 public function save(array $appointment): int
@@ -219,7 +220,8 @@ class CalendarAtomicSaveTest extends TestCase
         $CI->load->library('permissions');
         $controller->permissions = $CI->permissions;
         $controller->appointments_model = new class {
-            public function lock_update_parents(array $current, array $requested, array $additional = []): void {}
+            // This isolated model double does not model database lock scheduling.
+            public function lock_update_parents(array $current, array $requested, array $additional = [], ?callable $afterUsers = null): void {}
             public function only(array &$record, array $fields): void {}
 
             public function optional(array &$record, array $fields): void {}

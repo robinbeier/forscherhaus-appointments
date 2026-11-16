@@ -310,13 +310,13 @@ tokens or LDAP credentials. `IntegrationsLegacyHttpTest` checks these
 boundaries in an isolated synthetic HTTP/database stack; it does not prove a
 live production role-change race or exercise integration configuration writes.
 
-The classic `update` page and its direct `index` alias require the actor's
-current stored `system_settings` edit permission before the migration library
-is initialized. Anonymous and demoted sessions must not reach migration work;
-GET displays the confirmation page, HEAD cannot initiate migration, and other
-methods must be rejected. A POST additionally requires the framework's CSRF
-check. Isolated HTTP/database checks may verify denial and unchanged
-migration tracking, but must not use production to exercise migrations.
+The classic `update` page and its direct `index` alias are read-only operator
+guidance. They require the actor's current stored `system_settings` edit
+permission. GET and HEAD may display that guidance; POST and all other methods
+are rejected before migration initialization. Browser requests must never run
+migrations. Use the protected CLI release procedure for database changes.
+Isolated HTTP/database checks may verify denial and unchanged migration
+tracking, but must not use production to exercise migrations.
 
 The classic `account` page and its direct `index` alias accept GET only and
 require the current stored `user_settings` view permission. `account/save`
@@ -432,11 +432,12 @@ the stored and requested provider, so a stale session role cannot retain write
 authority after reassignment. Appointment create, update, and delete hold the
 actor and affected parent rows while rechecking authority before mutation.
 Manual unavailability save and delete also recheck the stored appointment
-action after locking the actor, provider, and existing manual event. A request
+action after locking the actor, provider, exact actor role, and existing manual event. A request
 waiting on that event must reject a permission revocation committed before it
 resumes. `CalendarUnavailabilityPermissionRaceHttpTest` checks this with own
-synthetic HTTP and database data; it does not establish a global lock protocol
-for independent edits to role permission bits or a production write result.
+synthetic HTTP and database data. Calendar now reserves the exact actor role
+between sorted user and service locks; this source ordering does not prove
+every role-bit interleaving or a production write result.
 Manual unavailability save also requires the requested target to remain a
 Provider before and after its user row is locked. A Customer or missing target
 is denied with 403 before insertion; the model's role validation remains a
@@ -687,12 +688,12 @@ URL-selected record and use the declared HTTP method even through a direct
 controller alias. A changed blocked period affects booking availability, so a
 rejected request must leave the complete period row unchanged. The precise
 contract and evidence boundary live in [CI write contracts](docs/ci-write-contracts.md#blocked-periods-api-v1).
-The classic authenticated blocked-period POST routes also hold the acting user
-row through create, update, or delete and recheck the stored action permission
-under that lock. A role downgrade committed before the actor lock is acquired
-must deny the write without changing the period; a downgrade waiting behind an
-already authorized write follows that write. This does not serialize edits to
-the role's permission bits or API Basic/Bearer authority.
+The classic authenticated blocked-period POST routes hold the acting user and
+its exact role row through create, update, or delete and recheck the stored
+action permission under those locks. A role or permission-bit revocation
+committed before the matching lock is acquired must deny the write without
+changing the period; a revocation waiting behind an already authorized write
+follows that write. API Basic/Bearer authority has a separate finalizer.
 The classic `store` action must not use a caller-supplied existing ID as an
 update; `update` requires a positive ID and must reject missing, empty, or
 invalid IDs with HTTP 400 before mutation. `BlockedPeriodsLegacyIdBoundaryHttpTest`
@@ -819,8 +820,8 @@ user, settings, and service associations are written in one transaction.
 Rejected requests and downstream failures must leave no partial Provider.
 The isolated `ProvidersStoreHttpTest` checks methods and aliases, sequential
 demotion, ID/type, CSRF, normal creation, and failed association writes with
-synthetic data. A concurrent edit to a role's permission bits is not
-serialized by the actor-user lock; the local tests do not establish every
+synthetic data. The write transaction also locks the actor's exact role row
+before service parents; the local tests do not establish every
 concurrent schedule or a production account write.
 
 The classic `admins/store` path accepts only POST with CSRF and requires the
@@ -842,9 +843,9 @@ the actor's current stored `users.edit` permission. It must update an existing
 Provider only: an omitted ID cannot create one, a shared-table ID of another
 role cannot become a Provider, and a request-supplied role cannot change the
 target's role. The actor and target user rows are locked in numeric ID order,
-followed by current and requested service parents, through the atomic user,
-setting, and service-association write. A concurrent
-edit to a role's permission bits is not serialized by these user-row locks.
+followed by the actor role and current/requested service parents, through the
+atomic user, setting, and service-association write. A concurrent role-bit edit
+must acquire that held role row before it can commit.
 The isolated `ProvidersUpdateHttpTest` checks the method, sequential demotion,
 ID/type, role-field, CSRF, normal update, and downstream-failure boundaries
 with synthetic data; it does not prove every concurrent role-change schedule
