@@ -186,7 +186,6 @@ class Admins_api_v1 extends EA_Controller
             $original_admin = $occurrences[0];
 
             $admin = $this->apiRequestDtoFactory()->buildEntityWritePayloadDto()->payload;
-
             // The URL selects the admin; a body ID may only repeat that target.
             if (array_key_exists('id', $admin)) {
                 if (!is_int($admin['id']) || $admin['id'] !== $id) {
@@ -207,7 +206,7 @@ class Admins_api_v1 extends EA_Controller
             // The model has completed the password update inside the outer
             // API transaction. Mark only an authenticated actor's own change
             // so Api can accept the single expected credential-version bump.
-            if (!empty($admin['settings']['password'])) {
+            if ($this->admins_model->last_saved_credential_version() !== null) {
                 $this->api->markBasicSelfCredentialChange($id);
             }
 

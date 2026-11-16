@@ -234,6 +234,80 @@ final class SettingsApiBasicRevocationHttpTest extends TestCase
         }
     }
 
+    public function testBasicWriteWaitsForActorRowThenRejectsAfterUsernameRename(): void
+    {
+        self::assertNotNull($this->fixture);
+        self::assertNotNull($this->server);
+
+        $db = get_instance()->db;
+        $setting = $this->fixture->ownedSetting('actor-username-lock-race', 'before');
+        $before = $this->fixture->settingRow((int) $setting['id']);
+        $actorBefore = $this->fixture->row('users', $this->fixture->actorId);
+        $settingsBefore = $db->get_where('user_settings', ['id_users' => $this->fixture->actorId])->row_array();
+        get_instance()->load->model('admins_model');
+        $admins = get_instance()->admins_model;
+        self::assertNotNull($admins);
+
+        $observer = $this->observer($db);
+        $multi = curl_multi_init();
+        $handle = null;
+        $transactionOpen = false;
+
+        try {
+            $ownerId = mysqli_thread_id($db->conn_id);
+            self::assertNotSame($ownerId, mysqli_thread_id($observer->conn_id));
+            self::assertTrue($db->trans_begin());
+            $transactionOpen = true;
+            self::assertNotFalse(
+                $db->query(
+                    'SELECT * FROM `' .
+                        $db->dbprefix('users') .
+                        '` WHERE `id` = ' .
+                        (int) $this->fixture->actorId .
+                        ' FOR UPDATE',
+                ),
+            );
+
+            $handle = $this->startBasicSettingsUpdate($setting['name'], $multi);
+            self::assertTrue($this->waitsForBasicActorLock($multi, $observer, $ownerId));
+
+            $renamed = $admins->find($this->fixture->actorId);
+            $renamed['settings']['username'] = 'renamed-' . $this->fixture->run;
+            self::assertSame($this->fixture->actorId, $admins->save($renamed));
+            self::assertSame(
+                (int) $actorBefore['credential_version'] + 1,
+                (int) $this->fixture->row('users', $this->fixture->actorId)['credential_version'],
+            );
+            self::assertTrue($db->trans_commit());
+            $transactionOpen = false;
+
+            self::assertTrue($this->drain($multi, $handle));
+            self::assertSame(401, (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE));
+            self::assertSame($before, $this->fixture->settingRow((int) $setting['id']));
+        } finally {
+            if ($transactionOpen && $db->trans_active()) {
+                $db->trans_rollback();
+            }
+            if ($handle instanceof CurlHandle) {
+                $this->drain($multi, $handle);
+                curl_multi_remove_handle($multi, $handle);
+                curl_close($handle);
+            }
+            curl_multi_close($multi);
+            $observer->close();
+            self::assertTrue(
+                (bool) $db->update('users', $actorBefore, ['id' => $actorBefore['id']]),
+                'Could not restore the synthetic actor row.',
+            );
+            self::assertTrue(
+                (bool) $db->update('user_settings', $settingsBefore, ['id_users' => $this->fixture->actorId]),
+                'Could not restore the synthetic actor settings.',
+            );
+            self::assertSame($actorBefore, $this->fixture->row('users', $this->fixture->actorId));
+            self::assertSame($settingsBefore, $db->get_where('user_settings', ['id_users' => $this->fixture->actorId])->row_array());
+        }
+    }
+
     private function startBasicSettingsUpdate(string $settingName, CurlMultiHandle $multi): CurlHandle
     {
         $handle = curl_init($this->server->baseUrl . '/api/v1/settings_api_v1/update/' . $settingName);
