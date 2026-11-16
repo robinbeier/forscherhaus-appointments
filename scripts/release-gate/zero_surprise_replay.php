@@ -1561,6 +1561,26 @@ function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $confi
     }
     $baselineBlockers = $baseline['snapshot'];
 
+    // A restored predeploy dump at migration 073 must prove the reversible
+    // migration sequence before the ordinary latest-migration step. Newer
+    // dumps already contain the index and retain the established path.
+    if (($config['rehearse_migration_074'] ?? false) !== true) {
+        $migrationGate = runMigration074PredeployGate($composePrefix, $repoRoot, $runner);
+        $substeps = array_merge($substeps, sanitizePredeployMigrationSubsteps($migrationGate['substeps']));
+        if ($migrationGate['status'] !== ZeroSurpriseReport::STATUS_PASS) {
+            return [
+                'status' => $migrationGate['status'],
+                'exit_code' => $migrationGate['exit_code'],
+                'duration_ms' => round((microtime(true) - $stepStartedAt) * 1000, 2),
+                'baseline_blockers' => $baselineBlockers,
+                'details' => [
+                    'failed_substep' => 'migration_074_predeploy_gate',
+                    'substeps' => $substeps,
+                ],
+            ];
+        }
+    }
+
     if (($config['rehearse_migration_074'] ?? false) === true) {
         $rehearsal = runMigration074Rehearsal($composePrefix, $repoRoot);
         return [
@@ -1650,6 +1670,95 @@ function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $confi
             'substeps' => $substeps,
         ],
     ];
+}
+
+/**
+ * Run the migration-074 rehearsal only for a verified 073 baseline. A state
+ * query failure is fail-closed; a structurally valid version-074 schema keeps
+ * the ordinary predeploy path unchanged.
+ *
+ * @return array{status:string,exit_code:int,substeps:array<int,array<string,mixed>>}
+ */
+function runMigration074PredeployGate(array $composePrefix, string $repoRoot, ?callable $runner = null): array
+{
+    $runner ??= static fn(array $command, string $workingDirectory, int $timeoutSeconds): array =>
+        GateProcessRunner::run($command, $workingDirectory, null, $timeoutSeconds);
+    $state = readMigration074State(
+        $composePrefix,
+        $repoRoot,
+        $runner,
+    );
+    $substeps = [$state['step']];
+    if ($state['status'] !== ZeroSurpriseReport::STATUS_PASS || !is_array($state['state'])) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+            'substeps' => sanitizePredeployMigrationSubsteps($substeps),
+        ];
+    }
+
+    $version = $state['state']['version'] ?? null;
+    if ($version === 74 && migration074CurrentStateIsValid($state['state'])) {
+        $substeps[] = [
+            'name' => 'migration_074_rehearsal',
+            'status' => ZeroSurpriseReport::STATUS_PASS,
+            'category' => 'not_required',
+            'exit_code' => ZERO_SURPRISE_EXIT_SUCCESS,
+            'duration_ms' => 0.0,
+            'details' => ['reason' => 'schema_version_not_073'],
+        ];
+        return [
+            'status' => ZeroSurpriseReport::STATUS_PASS,
+            'exit_code' => ZERO_SURPRISE_EXIT_SUCCESS,
+            'substeps' => sanitizePredeployMigrationSubsteps($substeps),
+        ];
+    }
+
+    if ($version !== 73) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'exit_code' => ZERO_SURPRISE_EXIT_ASSERTION_FAILURE,
+            'substeps' => sanitizePredeployMigrationSubsteps($substeps),
+        ];
+    }
+
+    if (!migration074BaselineIsSafe($state['state'])) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'exit_code' => ZERO_SURPRISE_EXIT_ASSERTION_FAILURE,
+            'substeps' => sanitizePredeployMigrationSubsteps($substeps),
+        ];
+    }
+
+    $rehearsal = runMigration074Rehearsal($composePrefix, $repoRoot, $runner);
+    return [
+        'status' => $rehearsal['status'],
+        'exit_code' => $rehearsal['exit_code'],
+        'substeps' => sanitizePredeployMigrationSubsteps(array_merge($substeps, $rehearsal['substeps'])),
+    ];
+}
+
+/** @param array<string,mixed> $state */
+function migration074CurrentStateIsValid(array $state): bool
+{
+    return ($state['appointments_table'] ?? false) === true &&
+        ($state['migrations_table'] ?? false) === true &&
+        ($state['version'] ?? null) === 74 &&
+        is_int($state['row_count'] ?? null) &&
+        ($state['row_count'] ?? 0) >= 0 &&
+        ($state['index_count'] ?? null) === 1 &&
+        ($state['column'] ?? null) === 'hash' &&
+        ($state['non_unique'] ?? null) === 1 &&
+        ($state['seq_in_index'] ?? null) === 1 &&
+        ($state['sub_part'] ?? null) === 64;
+}
+
+/** @param array<int,array<string,mixed>> $substeps @return array<int,array<string,mixed>> */
+function sanitizePredeployMigrationSubsteps(array $substeps): array
+{
+    $projected = sanitizeDiagnosticRestoreDetails(['substeps' => $substeps]);
+
+    return $projected['substeps'] ?? [];
 }
 
 /** @param array<int,array<string,mixed>> $substeps @return array<int,array<string,mixed>> */
