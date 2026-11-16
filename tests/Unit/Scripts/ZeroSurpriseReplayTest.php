@@ -12,6 +12,67 @@ require_once __DIR__ . '/../../../scripts/release-gate/zero_surprise_replay.php'
 
 class ZeroSurpriseReplayTest extends TestCase
 {
+    public function testMigration074RehearsalRunsExactUpDownUpAndPreservesAggregateRows(): void
+    {
+        $phase = 0;
+        $commands = [];
+        $runner = static function (array $command, string $workingDirectory, int $timeoutSeconds) use (&$phase, &$commands): array {
+            $commands[] = implode(' ', $command);
+            $joined = end($commands);
+            if (str_contains($joined, 'console migrate')) {
+                $phase++;
+                return ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
+            }
+            if (str_contains($joined, 'SHOW TABLES')) {
+                return ['exit_code' => 0, 'stdout' => "ea_appointments\nea_migrations\n", 'stderr' => ''];
+            }
+            if (str_contains($joined, 'SELECT version')) {
+                return ['exit_code' => 0, 'stdout' => ($phase === 1 || $phase === 3 ? "74\n" : "73\n"), 'stderr' => ''];
+            }
+            $indexed = $phase === 1 || $phase === 3;
+            return [
+                'exit_code' => 0,
+                'stdout' => '5\t' . ($indexed ? '1\thash\t1\t1\t64' : '0\t\t-1\t-1\t-1') . "\n",
+                'stderr' => '',
+            ];
+        };
+
+        $result = runMigration074Rehearsal(['docker', 'compose'], '/repo', $runner);
+
+        self::assertSame('pass', $result['status']);
+        self::assertSame(0, $result['exit_code']);
+        self::assertSame(
+            ['migrate_up', 'migrate_down', 'migrate_up'],
+            array_values(array_filter(array_column($result['substeps'], 'name'), static fn(string $name): bool => str_starts_with($name, 'migrate_'))),
+        );
+        self::assertSame(3, $phase);
+    }
+
+    public function testMigration074RehearsalFailsClosedOnMigrationFailure(): void
+    {
+        $phase = 0;
+        $runner = static function (array $command, string $workingDirectory, int $timeoutSeconds) use (&$phase): array {
+            $joined = implode(' ', $command);
+            if (str_contains($joined, 'console migrate')) {
+                $phase++;
+                return ['exit_code' => $phase === 2 ? 1 : 0, 'stdout' => '', 'stderr' => 'redacted'];
+            }
+            if (str_contains($joined, 'SHOW TABLES')) {
+                return ['exit_code' => 0, 'stdout' => "ea_appointments\nea_migrations\n", 'stderr' => ''];
+            }
+            if (str_contains($joined, 'SELECT version')) {
+                return ['exit_code' => 0, 'stdout' => ($phase === 1 ? "74\n" : "73\n"), 'stderr' => ''];
+            }
+            return ['exit_code' => 0, 'stdout' => ($phase === 1 ? "5\t1\thash\t1\t1\t64\n" : "5\t0\t\t-1\t-1\t-1\n"), 'stderr' => ''];
+        };
+
+        $result = runMigration074Rehearsal(['docker', 'compose'], '/repo', $runner);
+
+        self::assertSame('fail', $result['status']);
+        self::assertSame(2, $result['exit_code']);
+        self::assertSame(['migration_state', 'migrate_up', 'migration_state', 'migrate_down'], array_column($result['substeps'], 'name'));
+    }
+
     public function testReplayOverlayUsesVerifiedMariaDbRestoreImageAndCredentials(): void
     {
         $overlay = (string) file_get_contents(dirname(__DIR__, 3) . '/docker/compose.zero-surprise-replay.yml');

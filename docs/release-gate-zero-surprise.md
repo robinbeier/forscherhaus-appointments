@@ -87,6 +87,20 @@ the production dump attestor. The general `docker/compose.zero-surprise.yml`
 overlay deliberately does not replace the normal MySQL service, so ordinary
 CI fixtures continue to exercise the supported application database.
 
+### Migration 074 diagnostic rehearsal
+
+Pass `--rehearse-migration-074` to run an isolated diagnostic sequence against
+the supplied local dump. The runner requires migration version 073, the
+appointments and migration tables, no existing `idx_appointments_hash`, and
+an unchanged appointment row count. It then executes exactly `migrate up`,
+`migrate down`, and `migrate up`, checking the version and index definition
+after each step. Compose teardown and image cleanup remain mandatory.
+
+The report marks `input_attestation` as `unverified` and
+`release_evidence` as false. This mode never establishes production release
+readiness: a trusted operator must separately bind an attested backup dump to
+the deployment evidence authority before using any result for release work.
+
 Required keys:
 
 - `base_url`

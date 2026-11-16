@@ -61,6 +61,7 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
                 'max_pdf_duration_ms' => $config['max_pdf_duration_ms'],
                 'timezone' => $config['timezone'],
                 'output_json' => $config['output_json'],
+                'input_attestation' => ($config['rehearse_migration_074'] ?? false) === true ? 'unverified' : 'not_applicable',
             ],
             $config['output_json'],
         );
@@ -82,7 +83,15 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
         $bookingReport = null;
         $dashboardReport = null;
 
-        if ($restoreStep['status'] === ZeroSurpriseReport::STATUS_PASS) {
+        if (($config['rehearse_migration_074'] ?? false) === true) {
+            $report->addStep(
+                'migration_rehearsal_074',
+                $restoreStep['status'],
+                $restoreStep['exit_code'],
+                $restoreStep['duration_ms'],
+                ['details' => $restoreStep['details']],
+            );
+        } elseif ($restoreStep['status'] === ZeroSurpriseReport::STATUS_PASS) {
             $bookingCommand = composeCommand($composePrefix, [
                 'exec',
                 '-T',
@@ -421,6 +430,7 @@ function parseCliOptions(string $defaultOutputPath, string $defaultProfile): arr
         'max-pdf-duration-ms::',
         'timezone::',
         'output-json::',
+        'rehearse-migration-074',
     ]);
 
     if (!is_array($options)) {
@@ -495,6 +505,7 @@ function parseCliOptions(string $defaultOutputPath, string $defaultProfile): arr
         'max_pdf_duration_ms' => $resolved['max_pdf_duration_ms'],
         'timezone' => $resolved['timezone'],
         'output_json' => $outputJson,
+        'rehearse_migration_074' => array_key_exists('rehearse-migration-074', $options),
     ];
 }
 
@@ -1548,6 +1559,22 @@ function runRestoreDumpStep(
         ];
     }
 
+    if (($config['rehearse_migration_074'] ?? false) === true) {
+        $rehearsal = runMigration074Rehearsal($composePrefix, $repoRoot);
+        return [
+            'status' => $rehearsal['status'],
+            'exit_code' => $rehearsal['exit_code'],
+            'duration_ms' => round((microtime(true) - $stepStartedAt) * 1000, 2),
+            'baseline_blockers' => $baselineBlockers,
+            'details' => [
+                'input_attestation' => 'unverified',
+                'substeps' => array_merge($substeps, $rehearsal['substeps']),
+                'rehearsal' => 'migration_074_up_down_up',
+                'release_evidence' => false,
+            ],
+        ];
+    }
+
     $migrateResult = GateProcessRunner::run(
         composeCommand($composePrefix, ['exec', '-T', 'php-fpm', 'php', 'index.php', 'console', 'migrate']),
         $repoRoot,
@@ -1626,6 +1653,163 @@ function runRestoreDumpStep(
 /**
  * @param array<int, string> $composePrefix
  */
+/**
+ * Run the bounded migration-074 diagnostic sequence. The input dump is
+ * deliberately classified as unverified; this mode never produces release
+ * evidence. The runner is injectable so ordering and fail-closed behavior can
+ * be tested without a database.
+ *
+ * @param callable(array<int,string>,string,int):array<string,mixed>|null $runner
+ * @return array{status:string,exit_code:int,substeps:array<int,array<string,mixed>>}
+ */
+function runMigration074Rehearsal(array $composePrefix, string $repoRoot, ?callable $runner = null): array
+{
+    $runner ??= static fn(array $command, string $workingDirectory, int $timeoutSeconds): array =>
+        GateProcessRunner::run($command, $workingDirectory, null, $timeoutSeconds);
+
+    $substeps = [];
+    $baseline = readMigration074State($composePrefix, $repoRoot, $runner);
+    $substeps[] = $baseline['step'];
+    if ($baseline['status'] !== ZeroSurpriseReport::STATUS_PASS || !migration074BaselineIsSafe($baseline['state'])) {
+        return [
+            'status' => ZeroSurpriseReport::STATUS_FAIL,
+            'exit_code' => ZERO_SURPRISE_EXIT_ASSERTION_FAILURE,
+            'substeps' => $substeps,
+        ];
+    }
+
+    foreach (['up', 'down', 'up'] as $direction) {
+        $migration = $runner(
+            composeCommand($composePrefix, ['exec', '-T', 'php-fpm', 'php', 'index.php', 'console', 'migrate', $direction]),
+            $repoRoot,
+            300,
+        );
+        $substeps[] = summarizeSubstep('migrate_' . $direction, $migration);
+        if ((int) ($migration['exit_code'] ?? 1) !== 0) {
+            return [
+                'status' => ZeroSurpriseReport::STATUS_FAIL,
+                'exit_code' => ZERO_SURPRISE_EXIT_RUNTIME_ERROR,
+                'substeps' => $substeps,
+            ];
+        }
+
+        $state = readMigration074State($composePrefix, $repoRoot, $runner);
+        $substeps[] = $state['step'];
+        $expectedVersion = $direction === 'down' ? 73 : 74;
+        if (
+            $state['status'] !== ZeroSurpriseReport::STATUS_PASS ||
+            !migration074StateMatches($state['state'], $expectedVersion, $baseline['state'])
+        ) {
+            return [
+                'status' => ZeroSurpriseReport::STATUS_FAIL,
+                'exit_code' => ZERO_SURPRISE_EXIT_ASSERTION_FAILURE,
+                'substeps' => $substeps,
+            ];
+        }
+    }
+
+    return [
+        'status' => ZeroSurpriseReport::STATUS_PASS,
+        'exit_code' => ZERO_SURPRISE_EXIT_SUCCESS,
+        'substeps' => $substeps,
+    ];
+}
+
+/**
+ * @param callable(array<int,string>,string,int):array<string,mixed> $runner
+ * @return array{status:string,state:array<string,mixed>|null,step:array<string,mixed>}
+ */
+function readMigration074State(array $composePrefix, string $repoRoot, callable $runner): array
+{
+    $commands = [
+        ['SHOW TABLES LIKE \'ea_appointments\'; SHOW TABLES LIKE \'ea_migrations\';'],
+        ['SELECT version FROM ea_migrations LIMIT 1;'],
+        [
+            "SELECT (SELECT COUNT(*) FROM ea_appointments), (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='ea_appointments' AND index_name='idx_appointments_hash'), COALESCE((SELECT MAX(Column_name) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='ea_appointments' AND index_name='idx_appointments_hash'),'') , COALESCE((SELECT MAX(Non_unique) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='ea_appointments' AND index_name='idx_appointments_hash'),-1), COALESCE((SELECT MAX(Seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='ea_appointments' AND index_name='idx_appointments_hash'),-1), COALESCE((SELECT MAX(Sub_part) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='ea_appointments' AND index_name='idx_appointments_hash'),-1);",
+        ],
+    ];
+    $outputs = [];
+    foreach ($commands as $sql) {
+        $result = $runner(
+            composeCommand($composePrefix, ['exec', '-T', 'mysql', 'mysql', '-N', '-B', '-uroot', '-psecret', 'easyappointments', '-e', $sql[0]]),
+            $repoRoot,
+            120,
+        );
+        if ((int) ($result['exit_code'] ?? 1) !== 0) {
+            return [
+                'status' => ZeroSurpriseReport::STATUS_FAIL,
+                'state' => null,
+                'step' => summarizeSubstep('migration_state', $result),
+            ];
+        }
+        $outputs[] = trim((string) ($result['stdout'] ?? ''));
+    }
+
+    $tables = preg_split('/\R/', $outputs[0], -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $version = trim($outputs[1]);
+    $metrics = preg_split('/\R/', $outputs[2], -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $metricParts = isset($metrics[0]) ? explode("\t", $metrics[0]) : [];
+    $state = [
+        'appointments_table' => in_array('ea_appointments', $tables, true),
+        'migrations_table' => in_array('ea_migrations', $tables, true),
+        'version' => ctype_digit($version) ? (int) $version : null,
+        'row_count' => isset($metricParts[0]) && ctype_digit($metricParts[0]) ? (int) $metricParts[0] : null,
+        'index_count' => isset($metricParts[1]) && ctype_digit($metricParts[1]) ? (int) $metricParts[1] : null,
+        'column' => $metricParts[2] ?? null,
+        'non_unique' => isset($metricParts[3]) && is_numeric($metricParts[3]) ? (int) $metricParts[3] : null,
+        'seq_in_index' => isset($metricParts[4]) && is_numeric($metricParts[4]) ? (int) $metricParts[4] : null,
+        'sub_part' => isset($metricParts[5]) && is_numeric($metricParts[5]) ? (int) $metricParts[5] : null,
+    ];
+
+    return [
+        'status' => ZeroSurpriseReport::STATUS_PASS,
+        'state' => $state,
+        'step' => [
+            'name' => 'migration_state',
+            'status' => ZeroSurpriseReport::STATUS_PASS,
+            'exit_code' => ZERO_SURPRISE_EXIT_SUCCESS,
+            'duration_ms' => 0.0,
+            'details' => [
+                'appointments_table' => $state['appointments_table'],
+                'migrations_table' => $state['migrations_table'],
+                'version' => $state['version'],
+                'row_count' => $state['row_count'],
+                'index_count' => $state['index_count'],
+                'column' => $state['column'],
+                'non_unique' => $state['non_unique'],
+                'seq_in_index' => $state['seq_in_index'],
+                'sub_part' => $state['sub_part'],
+            ],
+        ],
+    ];
+}
+
+/** @param array<string,mixed>|null $state */
+function migration074BaselineIsSafe(?array $state): bool
+{
+    return is_array($state) &&
+        ($state['appointments_table'] ?? false) === true &&
+        ($state['migrations_table'] ?? false) === true &&
+        ($state['version'] ?? null) === 73 &&
+        ($state['row_count'] ?? null) !== null &&
+        ($state['index_count'] ?? null) === 0;
+}
+
+/** @param array<string,mixed>|null $state @param array<string,mixed>|null $baseline */
+function migration074StateMatches(?array $state, int $expectedVersion, ?array $baseline): bool
+{
+    if (!is_array($state) || !is_array($baseline)) {
+        return false;
+    }
+    $indexExpected = $expectedVersion === 74;
+    return ($state['appointments_table'] ?? false) === true &&
+        ($state['migrations_table'] ?? false) === true &&
+        ($state['version'] ?? null) === $expectedVersion &&
+        ($state['row_count'] ?? null) === ($baseline['row_count'] ?? null) &&
+        ($state['index_count'] ?? null) === ($indexExpected ? 1 : 0) &&
+        (!$indexExpected || (($state['column'] ?? null) === 'hash' && ($state['non_unique'] ?? null) === 1 && ($state['seq_in_index'] ?? null) === 1 && ($state['sub_part'] ?? null) === 64));
+}
+
 function runDumpImport(array $composePrefix, string $repoRoot, string $dumpFile): array
 {
     $composeShell = toShellCommand($composePrefix);
@@ -2208,6 +2392,7 @@ function printUsage(): void
         '  --timezone=TZID                Time zone override (default profile: Europe/Berlin)',
         '  --output-json=PATH             Consolidated report path',
         '                                (default: .release-gate/zero-surprise-<UTC>.json)',
+        '  --rehearse-migration-074      Isolated diagnostic Up/Down/Up; input_attestation is unverified',
         '  --help                         Show this help',
         '',
         'Exit codes:',
