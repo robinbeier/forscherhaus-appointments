@@ -186,6 +186,39 @@ final class CustomersReadProjectionHttpTest extends TestCase
         }
     }
 
+    public function testBoundedSearchInputsReturnBadRequestAcrossSearchControllers(): void
+    {
+        $fixture = $this->fixture;
+        self::assertNotNull($fixture);
+        $client = $this->login($this->credentials['admin_username'], $this->credentials['password']);
+        $invalidRequests = [
+            ['keyword' => str_repeat('x', 129)],
+            ['order_by' => implode(',', array_fill(0, 5, 'id DESC'))],
+            ['order_by' => ',,,'],
+            ['offset' => 100001],
+        ];
+
+        foreach ($invalidRequests as $request) {
+            foreach (
+                [
+                    'admins/search',
+                    'providers/search',
+                    'customers/search',
+                    'services/search',
+                    'service_categories/search',
+                    'blocked_periods/search',
+                    'secretaries/search',
+                ]
+                as $endpoint
+            ) {
+                $response = $client->post($endpoint, $request);
+
+                self::assertSame(400, $response->statusCode, $endpoint . ': ' . $response->body);
+                self::assertStringContainsString('Invalid search request.', $response->body);
+            }
+        }
+    }
+
     public function testDemotedAdminCannotReadCustomersWithEitherLimitSetting(): void
     {
         $fixture = $this->fixture;

@@ -13,6 +13,7 @@ parameters:
     scanFiles:
         - phpstan/stubs/codeigniter-functions.stub.php
         - phpstan/stubs/request-dto-api.stub.php
+        - application/helpers/http_helper.php
     scanDirectories:
         - system
         - application/core

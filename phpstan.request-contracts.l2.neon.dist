@@ -42,6 +42,7 @@ parameters:
     scanFiles:
         - phpstan/stubs/codeigniter-functions.stub.php
         - application/helpers/rate_limit_helper.php
+        - application/helpers/http_helper.php
     scanDirectories:
         - system
         - application/core

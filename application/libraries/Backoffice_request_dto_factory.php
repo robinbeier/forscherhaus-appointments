@@ -64,6 +64,17 @@ class Backoffice_request_dto_factory
     /** Keep authenticated backoffice searches bounded at the existing default size. */
     private const MAX_SEARCH_LIMIT = 1000;
 
+    /** Bound the work performed by LIKE-heavy backoffice searches. */
+    private const MAX_SEARCH_KEYWORD_LENGTH = 128;
+
+    /** Bound sort parsing and the generated ORDER BY clause. */
+    private const MAX_SEARCH_ORDER_BY_LENGTH = 256;
+    private const MAX_SEARCH_ORDER_TERMS = 4;
+    private const MAX_SEARCH_ORDER_TERM_LENGTH = 64;
+
+    /** Prevent deep-offset scans from walking unbounded result sets. */
+    private const MAX_SEARCH_OFFSET = 100000;
+
     protected Request_normalizer $request_normalizer;
 
     public function __construct(?Request_normalizer $request_normalizer = null)
@@ -126,12 +137,46 @@ class Backoffice_request_dto_factory
         $normalized_limit = $this->request_normalizer->normalizeInt($limit, $default_limit) ?? $default_limit;
         $normalized_offset = $this->request_normalizer->normalizeInt($offset, 0) ?? 0;
 
+        if (strlen($normalized_keyword) > self::MAX_SEARCH_KEYWORD_LENGTH) {
+            throw new BackofficeSearchInputException('Search keyword exceeds the maximum length.');
+        }
+
+        $normalized_order_by ??= $default_order_by;
+        $this->assertSearchOrderByBounded($normalized_order_by);
+
+        if ($normalized_offset > self::MAX_SEARCH_OFFSET) {
+            throw new BackofficeSearchInputException('Search offset exceeds the maximum range.');
+        }
+
         return new BackofficeSearchRequestDto(
             $normalized_keyword,
-            $normalized_order_by ?? $default_order_by,
+            $normalized_order_by,
             min(self::MAX_SEARCH_LIMIT, max(0, $normalized_limit)),
             max(0, $normalized_offset),
         );
+    }
+
+    private function assertSearchOrderByBounded(string $order_by): void
+    {
+        if (strlen($order_by) > self::MAX_SEARCH_ORDER_BY_LENGTH) {
+            throw new BackofficeSearchInputException('Search ordering exceeds the maximum length.');
+        }
+
+        $terms = array_map('trim', explode(',', $order_by));
+
+        if (in_array('', $terms, true)) {
+            throw new BackofficeSearchInputException('Search ordering contains an empty term.');
+        }
+
+        if (count($terms) > self::MAX_SEARCH_ORDER_TERMS) {
+            throw new BackofficeSearchInputException('Search ordering contains too many terms.');
+        }
+
+        foreach ($terms as $term) {
+            if (strlen($term) > self::MAX_SEARCH_ORDER_TERM_LENGTH) {
+                throw new BackofficeSearchInputException('Search ordering term exceeds the maximum length.');
+            }
+        }
     }
 
     public function createEntityPayloadRequestDto(mixed $payload): BackofficeEntityPayloadRequestDto
