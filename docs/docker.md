@@ -446,71 +446,22 @@ COMPOSE_PROJECT_NAME=fh-ldap bash ./scripts/ldap/smoke.sh
 
 ## Restoring a Server Dump Locally
 
-Use this workflow when you want your local setup to run with a database dump from production/staging.
+The production-dump importer is currently suspended. It previously executed
+verification, migrations, and the application from the mutable checkout after
+downloading real production data. That checkout is not an independent trusted
+runtime and the normal Compose network does not provide an egress boundary.
+`scripts/import_prod_backup.sh` therefore fails before contacting SSH/SCP,
+Docker, or creating local import state.
 
-Recommended path for the current production host:
+Do not re-enable the importer by adding a flag or changing its environment. A
+replacement must first provide an independently trusted immutable runtime, a
+network-isolated verifier, and an anonymized or otherwise explicitly authorized
+data path. Until then, use synthetic fixtures and the existing isolated release
+replay for validation; neither is a substitute for a production-data restore.
+For local development, use the deterministic install/reset helpers and
+synthetic fixtures. Do not copy a production dump into this workflow.
 
-```bash
-bash ./scripts/import_prod_backup.sh \
-  --remote-backup-dir /root/backups/easyappointments/20260313T074134Z \
-  --ssh-known-hosts-file /path/to/dedicated/booking-server.known_hosts
-```
-
-The script will:
-
-- use an existing canonical backup set on `root@booking-server` over Tailscale
-- require a separately enrolled, dedicated host-key file and ignore the user's
-  implicit SSH `known_hosts`; first-use host-key acceptance is disabled
-- verify the pinned local MySQL/nginx images and build the PHP-FPM image from
-  digest-pinned, checksum-verified inputs before contacting the production host
-- download the dump plus metadata into a new, private directory under `/tmp`
-  (directory `0700`, files `0600`); the printed path remains available for
-  inspection and must be handled as a production-data copy
-- create a safety archive of the current local `docker/mysql` directory in a unique private temporary directory (directory `0700`, archive `0600`); its printed path remains available for recovery
-- reset the local MySQL data directory
-- import the production dump into the local `easyappointments` database
-- run `php index.php console migrate`
-- start the remaining Docker services again without pulling new images
-
-The importer requires `--remote-backup-dir`; it intentionally never creates a
-production backup or runs a mutable remote backup command. Only the backup set
-currently named by the production `last_backup_set.json` handoff can pass
-verification; retained older sets require a separate validated restore route.
-Docker Compose is started with `--pull never` and `--no-build` after the
-preflight so a registry tag cannot change between verification and the local
-restore. The preflight may fetch a missing digest-pinned base image or
-checksum-verified build
-artifact; it never resolves a mutable tag.
-
-The imported database remains a local copy. In the default Compose stack,
-the app and database are published only on host loopback; phpMyAdmin, when
-started, is loopback-only too. `--core-services-only` does not start
-phpMyAdmin.
-
-The importer never creates a production backup. The remote backup root is
-fixed to the approved production path, and the directory must be a direct
-child whose name is a UTC timestamp set ID such as `20260313T074134Z`. The
-importer checks the remote directory, dump, and metadata files before
-downloading them.
-
-Useful options:
-
-```bash
-# reuse an existing remote backup directory
-bash ./scripts/import_prod_backup.sh \
-  --remote-backup-dir /root/backups/easyappointments/20260313T074134Z \
-  --ssh-known-hosts-file /path/to/dedicated/booking-server.known_hosts
-
-# leave only mysql/php-fpm/nginx running after the import
-bash ./scripts/import_prod_backup.sh \
-  --remote-backup-dir /root/backups/easyappointments/20260313T074134Z \
-  --ssh-known-hosts-file /path/to/dedicated/booking-server.known_hosts \
-  --core-services-only
-```
-
-Manual fallback (synthetic/local fixtures only; never use this path for a
-production-data dump because it bypasses the importer’s digest and installer
-preflight):
+Synthetic/local fixture reset:
 
 ```bash
 cd /path/to/forscherhaus-appointments
@@ -533,26 +484,8 @@ docker compose up -d mysql php-fpm nginx
 # Wait until MySQL is ready.
 until docker compose exec -T mysql mysqladmin ping -h localhost -uroot -psecret --silent; do sleep 2; done
 
-# Recreate the target DB and import the dump file.
-docker compose exec -T mysql mysql -uroot -psecret -e "
-DROP DATABASE IF EXISTS easyappointments;
-CREATE DATABASE easyappointments CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-"
-gunzip -c easyappointments_YYYY-MM-DD_HHMMSSZ.sql.gz | docker compose exec -T mysql mysql -uroot -psecret easyappointments
-
-# Run migrations to bring schema/settings to current code level.
-docker compose exec -T php-fpm php index.php console migrate
-```
-
-Verify after import:
-
-```bash
-docker compose exec -T mysql mysql -uroot -psecret -e "
-USE easyappointments;
-SELECT version FROM ea_migrations;
-SHOW COLUMNS FROM ea_users LIKE 'class_size_default';
-SELECT name, value FROM ea_settings WHERE name='dashboard_conflict_threshold';
-"
+# Install the synthetic application schema and fixtures.
+docker compose exec -T php-fpm php index.php console install
 ```
 
 **Attention:** This configuration is meant to make development easier. It is not intended to server as a production environment!
