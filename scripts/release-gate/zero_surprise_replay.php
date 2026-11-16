@@ -1385,13 +1385,7 @@ function isNoLiveSlotFailure(?array $bookingReport, array $config, array $initia
  * @param array<string, mixed> $config
  * @return array<string, mixed>
  */
-function runRestoreDumpStep(
-    string $repoRoot,
-    array $composePrefix,
-    array $config,
-    ?callable $runner = null,
-    ?callable $beforeMigration = null,
-): array
+function runRestoreDumpStep(string $repoRoot, array $composePrefix, array $config, ?callable $runner = null): array
 {
     $stepStartedAt = microtime(true);
     $substeps = [];
@@ -1566,23 +1560,6 @@ function runRestoreDumpStep(
         ];
     }
     $baselineBlockers = $baseline['snapshot'];
-
-    // Test harnesses may stop at this boundary to prove that restore admission
-    // happens before any migration. Production callers must leave this unset;
-    // the normal replay lifecycle continues through migration and teardown.
-    if ($beforeMigration !== null && $beforeMigration($baselineBlockers) === true) {
-        return [
-            'status' => ZeroSurpriseReport::STATUS_PASS,
-            'exit_code' => ZERO_SURPRISE_EXIT_SUCCESS,
-            'duration_ms' => round((microtime(true) - $stepStartedAt) * 1000, 2),
-            'baseline_blockers' => $baselineBlockers,
-            'details' => [
-                'substeps' => $substeps,
-                'migration_invoked' => false,
-                'paused_after_restore' => true,
-            ],
-        ];
-    }
 
     if (($config['rehearse_migration_074'] ?? false) === true) {
         $rehearsal = runMigration074Rehearsal($composePrefix, $repoRoot);
