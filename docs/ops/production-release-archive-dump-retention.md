@@ -247,7 +247,7 @@ installed as an independent helper. The remaining helper rollout has this exact 
    ```bash
    bash scripts/ops/prod_doctor.sh
    bash scripts/ops/prod_cleanup_inventory.sh
-   ssh -o StrictHostKeyChecking=accept-new \
+   ssh -o StrictHostKeyChecking=yes \
      "${PROD_SSH_TARGET:-root@booking-server}" \
      '/usr/local/libexec/fh-release-archive-dump-retention-v1 marker-status 691200'
    ```
@@ -266,7 +266,7 @@ installed as an independent helper. The remaining helper rollout has this exact 
    retained resource monitor without changing the setting:
 
    ```bash
-     ssh -o StrictHostKeyChecking=accept-new \
+     ssh -o StrictHostKeyChecking=yes \
      "${PROD_SSH_TARGET:-root@booking-server}" \
      'KUMA_PUSH_ENV_FILE=/root/backups/uptime-kuma-push.env /usr/local/libexec/fh-kuma-push-runtime-v1/scripts/ops/kuma_push_host_resources.sh'
    ```
@@ -286,7 +286,7 @@ installed as an independent helper. The remaining helper rollout has this exact 
    prove that it remains inactive:
 
    ```bash
-   ssh -o StrictHostKeyChecking=accept-new \
+   ssh -o StrictHostKeyChecking=yes \
      "${PROD_SSH_TARGET:-root@booking-server}" \
      '/usr/bin/systemctl enable fh-release-archive-dump-retention.timer && /usr/bin/systemctl is-enabled fh-release-archive-dump-retention.timer && /usr/bin/systemctl is-active fh-release-archive-dump-retention.timer'
    ```
@@ -300,7 +300,7 @@ installed as an independent helper. The remaining helper rollout has this exact 
    bash scripts/ops/prod_doctor.sh
    bash scripts/ops/prod_cleanup_inventory.sh
    bash scripts/ops/prod_release_archive_dump_retention.sh
-   ssh -o StrictHostKeyChecking=accept-new \
+   ssh -o StrictHostKeyChecking=yes \
      "${PROD_SSH_TARGET:-root@booking-server}" \
      '/usr/bin/systemctl start fh-release-archive-dump-retention.timer && /usr/bin/systemctl is-enabled fh-release-archive-dump-retention.timer && /usr/bin/systemctl is-active fh-release-archive-dump-retention.timer && /usr/bin/systemctl list-timers --all fh-release-archive-dump-retention.timer && /usr/bin/systemctl show fh-release-archive-dump-retention.service -p ActiveState -p SubState -p Result -p ExecMainStatus'
    ```

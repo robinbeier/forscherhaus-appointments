@@ -47,11 +47,20 @@ final class BuildReleasePublicationContractTest extends TestCase
             'PROVENANCE_TEMP=".${REL}.build-provenance.json.upload-${REMOTE_NONCE}"',
             $publisher,
         );
-        self::assertStringContainsString('scp -- "$ARCHIVE" "$UPLOAD:$REMOTE_DIR/$ARCHIVE_TEMP"', $publisher);
-        self::assertStringContainsString('scp -- "$PROVENANCE" "$UPLOAD:$REMOTE_DIR/$PROVENANCE_TEMP"', $publisher);
+        self::assertStringContainsString(
+            'scp "${SSH_OPTIONS[@]}" -- "$ARCHIVE" "$UPLOAD:$REMOTE_DIR/$ARCHIVE_TEMP"',
+            $publisher,
+        );
+        self::assertStringContainsString(
+            'scp "${SSH_OPTIONS[@]}" -- "$PROVENANCE" "$UPLOAD:$REMOTE_DIR/$PROVENANCE_TEMP"',
+            $publisher,
+        );
         self::assertStringContainsString('/usr/bin/python3 -I -B - --prepare "$REMOTE_DIR"', $publisher);
         self::assertStringNotContainsString('/usr/bin/install -d', $publisher);
-        self::assertStringContainsString('ssh "$UPLOAD" /usr/bin/chmod 0600', $publisher);
+        self::assertStringContainsString(
+            'ssh "${SSH_OPTIONS[@]}" "$UPLOAD" /usr/bin/chmod 0600',
+            $publisher,
+        );
         self::assertStringContainsString('[[ "$UPLOAD" =~ ^root@[A-Za-z0-9.-]+$ ]]', $publisher);
         self::assertStringContainsString('[[ "$REMOTE_DIR" == "/root/releases" ]]', $publisher);
         self::assertStringContainsString(
@@ -111,6 +120,54 @@ final class BuildReleasePublicationContractTest extends TestCase
         self::assertStringContainsString('[[ -f "$ASSET_SOURCE" && ! -L "$ASSET_SOURCE" ]]', $script);
         self::assertStringContainsString('[[ "$GENERATED_ASSET_COUNT" -gt 0 ]]', $script);
         self::assertStringNotContainsString('cp -R assets', $script);
+    }
+
+    public function testProductionSshHelpersRequireExplicitStrictHostKeyChecking(): void
+    {
+        $root = dirname(__DIR__, 3);
+        $paths = array_merge(
+            glob($root . '/scripts/ops/*.sh') ?: [],
+            [$root . '/scripts/import_prod_backup.sh'],
+        );
+
+        self::assertNotSame([], $paths);
+        $isBoundInvocation = static function (string $line): bool {
+            if (!preg_match('/(?:^|[|=(])\s*(?:ssh|scp)\s+/', $line)) {
+                return true;
+            }
+
+            return str_contains($line, '${SSH_OPTIONS[@]}') || str_contains($line, 'StrictHostKeyChecking=yes');
+        };
+        $hasStrictOption = static fn(string $source): bool => str_contains($source, 'StrictHostKeyChecking=yes');
+        self::assertFalse($isBoundInvocation('ssh "$target"'));
+        self::assertTrue($isBoundInvocation('ssh "${SSH_OPTIONS[@]}" "$target"'));
+        self::assertFalse(
+            $hasStrictOption("SSH_OPTIONS=()\nssh \"\${SSH_OPTIONS[@]}\" \"\$target\""),
+            'An empty SSH_OPTIONS array must not satisfy the strict host-key contract.',
+        );
+        foreach ($paths as $path) {
+            $source = (string) file_get_contents($path);
+            if (!preg_match('/\b(?:ssh|scp)\b/', $source)) {
+                continue;
+            }
+            self::assertStringNotContainsString('StrictHostKeyChecking=accept-new', $path . "\n" . $source);
+            self::assertTrue(
+                $hasStrictOption($source),
+                sprintf('%s must declare StrictHostKeyChecking=yes.', $path),
+            );
+            foreach (preg_split('/\R/', $source) ?: [] as $lineNumber => $line) {
+                if (!preg_match('/(?:^|[|=(])\s*(?:ssh|scp)\s+/', $line)) {
+                    continue;
+                }
+                self::assertTrue(
+                    $isBoundInvocation($line),
+                    sprintf('%s:%d has an unbound SSH/SCP invocation.', $path, $lineNumber + 1),
+                );
+            }
+            if (str_contains($source, '"ssh",')) {
+                self::assertStringContainsString('"-o", "StrictHostKeyChecking=yes"', $source);
+            }
+        }
     }
 
     public function testTarMetadataFlagsUseOptionAcceptanceNotHelpText(): void

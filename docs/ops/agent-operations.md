@@ -91,6 +91,13 @@ Default target over Tailscale MagicDNS:
 root@booking-server
 ```
 
+All production SSH helpers require `StrictHostKeyChecking=yes` and therefore
+use only an already enrolled entry in the operator's SSH `known_hosts` file.
+Before the first use on a workstation, independently verify the server's host
+key fingerprint through a trusted channel and enroll that exact key; the
+helpers never accept a new or changed key automatically and never run
+`ssh-keyscan` to create trust.
+
 Override it with:
 
 ```bash

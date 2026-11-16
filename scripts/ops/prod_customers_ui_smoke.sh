@@ -32,7 +32,7 @@ readonly CONTRACT_PATHS=(
     'scripts/ops/customers_ui_smoke_principals.sh'
 )
 
-SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
+SSH_OPTIONS=(-o StrictHostKeyChecking=yes)
 PROD_SSH_TARGET="$(prod_default_ssh_target)"
 BASE_URL='https://dasforscherhaus-leg.de'
 INDEX_PAGE='index.php'

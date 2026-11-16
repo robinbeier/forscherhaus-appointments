@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/ops/lib/prod_common.sh
 source "${SCRIPT_DIR}/lib/prod_common.sh"
 
-SSH_OPTIONS=(-o StrictHostKeyChecking=accept-new)
+SSH_OPTIONS=(-o StrictHostKeyChecking=yes)
 PROD_SSH_TARGET="$(prod_default_ssh_target)"
 PROD_DOCTOR_SCRIPT="${CSP_REPORT_ONLY_DOCTOR_SCRIPT:-${SCRIPT_DIR}/prod_doctor.sh}"
 STATE_VALIDATOR_SCRIPT="${SCRIPT_DIR}/csp_report_only_validate_receipt.php"

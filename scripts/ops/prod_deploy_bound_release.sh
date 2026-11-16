@@ -7,6 +7,7 @@ export GIT_NO_REPLACE_OBJECTS=1
 
 PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 TARGET='root@booking-server'
+SSH_OPTIONS=(-o BatchMode=yes -o ConnectTimeout=12 -o StrictHostKeyChecking=yes)
 REL=''; COMMIT=''; ACTIVE=''; ARCHIVE=''; PROVENANCE=''; EXECUTE=0; CONFIRM=''
 
 usage() {
@@ -161,7 +162,7 @@ preflight="$(GIT_DIR="$git_dir" GIT_WORK_TREE="$snapshot_dir" \
 
 # This observation remains private to the operator invocation; the remote
 # admission reopens and validates the protected file against this commitment.
-continuity_sha="$(ssh -o BatchMode=yes -o ConnectTimeout=12 "$TARGET" \
+continuity_sha="$(ssh "${SSH_OPTIONS[@]}" "$TARGET" \
     /usr/bin/sha256sum /root/backups/easyappointments/backup_continuity_state.json \
     2>/dev/null | awk 'NR == 1 {print $1}')" || {
     echo 'ERROR: backup continuity observation unavailable.' >&2; exit 70
@@ -174,7 +175,7 @@ printf 'schema=bound_release_deploy_attempt.v1\nrun_id=%s\n' "$run_id"
 receipt_file="$(mktemp "${TMPDIR:-/tmp}/fh-bound-deploy.XXXXXX")"
 trap 'rm -f -- "$receipt_file"; rm -rf -- "$snapshot_dir"' EXIT
 
-if printf '%s' "$RUNNER_B64" | decode_runner | ssh -o BatchMode=yes -o ConnectTimeout=12 "$TARGET" \
+if printf '%s' "$RUNNER_B64" | decode_runner | ssh "${SSH_OPTIONS[@]}" "$TARGET" \
     /usr/bin/python3 -I -B - \
     --release "$REL" --expected-active-release "$ACTIVE" --commit "$COMMIT" \
     --archive-sha "$ARCHIVE_SHA" --archive-size "$ARCHIVE_SIZE" \
@@ -263,7 +264,7 @@ if (( deployment_known == 1 )) && { (( remote_rc == 0 )) || (( remote_rc == 30 )
     }
     ack_receipt_file="$(mktemp "${TMPDIR:-/tmp}/fh-bound-deploy-ack.XXXXXX")"
     trap 'rm -f -- "$receipt_file" "$ack_receipt_file"; rm -rf -- "$snapshot_dir"' EXIT
-    if printf '%s' "$RUNNER_B64" | decode_runner | ssh -o BatchMode=yes -o ConnectTimeout=12 "$TARGET" \
+    if printf '%s' "$RUNNER_B64" | decode_runner | ssh "${SSH_OPTIONS[@]}" "$TARGET" \
         /usr/bin/python3 -I -B - \
         --ack --release "$REL" --expected-active-release "$ACTIVE" --commit "$COMMIT" \
         --archive-sha "$ARCHIVE_SHA" --archive-size "$ARCHIVE_SIZE" \

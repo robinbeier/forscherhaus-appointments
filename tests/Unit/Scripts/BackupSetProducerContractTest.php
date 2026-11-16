@@ -299,10 +299,10 @@ final class BackupSetProducerContractTest extends TestCase
             );
             self::assertSame(0, $execute['exit'], $execute['stderr']);
             self::assertSame(
-                '-o StrictHostKeyChecking=accept-new prod.example ' .
+                '-o StrictHostKeyChecking=yes prod.example ' .
                     '/usr/bin/python3 -I -B /usr/local/libexec/fh-backup-set-producer-v1' .
                     "\n" .
-                    '-o StrictHostKeyChecking=accept-new prod.example ' .
+                    '-o StrictHostKeyChecking=yes prod.example ' .
                     '/usr/bin/php -n /usr/local/libexec/fh/verify_deployment_dump_v1.php --continuity-state' .
                     "\n",
                 (string) file_get_contents($log),
@@ -331,7 +331,7 @@ final class BackupSetProducerContractTest extends TestCase
             );
             self::assertSame(75, $execute['exit'], $execute['stderr']);
             self::assertSame(
-                '-o StrictHostKeyChecking=accept-new prod.example ' .
+                '-o StrictHostKeyChecking=yes prod.example ' .
                     '/usr/bin/python3 -I -B /usr/local/libexec/fh-backup-set-producer-v1' .
                     "\n",
                 (string) file_get_contents($log),
@@ -376,7 +376,7 @@ final class BackupSetProducerContractTest extends TestCase
             );
             self::assertSame(0, $execute['exit'], $execute['stderr']);
             self::assertSame(
-                '-o StrictHostKeyChecking=accept-new prod.example ' .
+                '-o StrictHostKeyChecking=yes prod.example ' .
                     '/usr/bin/php -n /usr/local/libexec/fh/verify_deployment_dump_v1.php --latest-handoff' .
                     "\n",
                 (string) file_get_contents($log),

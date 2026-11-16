@@ -113,7 +113,8 @@ source = sys.stdin.buffer.read(1024 * 1024 + 1)
 if not source or len(source) > 1024 * 1024 or hashlib.sha256(source).hexdigest() != sys.argv[2]:
     sys.exit(70)
 command = [
-    "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=12", sys.argv[4],
+    "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=12",
+    "-o", "StrictHostKeyChecking=yes", sys.argv[4],
     "/usr/bin/python3", "-I", "-B", "-", *sys.argv[5:],
 ]
 try:
