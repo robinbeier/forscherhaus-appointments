@@ -73,6 +73,35 @@ class ZeroSurpriseReplayTest extends TestCase
         self::assertSame(['migration_state', 'migrate_up', 'migration_state', 'migrate_down'], array_column($result['substeps'], 'name'));
     }
 
+    public function testMigration074BaselineAndStateChecksRejectUnsafeInputsAndDrift(): void
+    {
+        $baseline = [
+            'appointments_table' => true,
+            'migrations_table' => true,
+            'version' => 73,
+            'row_count' => 5,
+            'index_count' => 0,
+        ];
+        self::assertTrue(migration074BaselineIsSafe($baseline));
+        self::assertFalse(migration074BaselineIsSafe([...$baseline, 'version' => 72]));
+        self::assertFalse(migration074BaselineIsSafe([...$baseline, 'index_count' => 1]));
+        self::assertFalse(migration074BaselineIsSafe([...$baseline, 'appointments_table' => false]));
+
+        $indexed = [...$baseline, 'version' => 74, 'index_count' => 1, 'column' => 'hash', 'non_unique' => 1, 'seq_in_index' => 1, 'sub_part' => 64];
+        self::assertTrue(migration074StateMatches($indexed, 74, $baseline));
+        self::assertFalse(migration074StateMatches([...$indexed, 'row_count' => 6], 74, $baseline));
+        self::assertFalse(migration074StateMatches([...$indexed, 'sub_part' => 32], 74, $baseline));
+        self::assertTrue(migration074StateMatches($baseline, 73, $baseline));
+    }
+
+    public function testMigration074InvariantClassifiesSuccessfulDiagnosticAsNonReleaseEvidence(): void
+    {
+        $invariants = collectMigration074Invariants(['status' => 'pass']);
+        self::assertSame('pass', $invariants['migration_074_rehearsal']['status']);
+        self::assertSame('unverified', $invariants['migration_074_rehearsal']['details']['input_attestation']);
+        self::assertFalse($invariants['migration_074_rehearsal']['details']['release_evidence']);
+    }
+
     public function testReplayOverlayUsesVerifiedMariaDbRestoreImageAndCredentials(): void
     {
         $overlay = (string) file_get_contents(dirname(__DIR__, 3) . '/docker/compose.zero-surprise-replay.yml');

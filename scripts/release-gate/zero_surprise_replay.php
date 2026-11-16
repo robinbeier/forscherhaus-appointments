@@ -43,26 +43,28 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
             '.release-gate/zero-surprise-booking-hypothetical-unblocked-' . $timestamp . '.json';
         $dashboardReportPath = '.release-gate/zero-surprise-dashboard-' . $timestamp . '.json';
 
+        $reportConfig = [
+            'dump_file' => ($config['rehearse_migration_074'] ?? false) === true ? null : $config['dump_file'],
+            'credentials_file' => ($config['rehearse_migration_074'] ?? false) === true ? null : $config['credentials_file'],
+            'profile_name' => $config['profile_name'],
+            'profile_window' => $config['profile_window'],
+            'base_url' => $config['base_url'],
+            'index_page' => $config['index_page'],
+            'start_date' => $config['start_date'],
+            'end_date' => $config['end_date'],
+            'booking_search_days' => $config['booking_search_days'],
+            'booking_start_date' => $config['booking_start_date'],
+            'retry_count' => $config['retry_count'],
+            'max_pdf_duration_ms' => $config['max_pdf_duration_ms'],
+            'timezone' => $config['timezone'],
+            'output_json' => $config['output_json'],
+            'input_attestation' => ($config['rehearse_migration_074'] ?? false) === true ? 'unverified' : 'not_applicable',
+        ];
+
         $report = new ZeroSurpriseReport(
             $config['release_id'],
             $composeProject,
-            [
-                'dump_file' => $config['dump_file'],
-                'credentials_file' => $config['credentials_file'],
-                'profile_name' => $config['profile_name'],
-                'profile_window' => $config['profile_window'],
-                'base_url' => $config['base_url'],
-                'index_page' => $config['index_page'],
-                'start_date' => $config['start_date'],
-                'end_date' => $config['end_date'],
-                'booking_search_days' => $config['booking_search_days'],
-                'booking_start_date' => $config['booking_start_date'],
-                'retry_count' => $config['retry_count'],
-                'max_pdf_duration_ms' => $config['max_pdf_duration_ms'],
-                'timezone' => $config['timezone'],
-                'output_json' => $config['output_json'],
-                'input_attestation' => ($config['rehearse_migration_074'] ?? false) === true ? 'unverified' : 'not_applicable',
-            ],
+            $reportConfig,
             $config['output_json'],
         );
 
@@ -357,7 +359,7 @@ if (!defined('ZERO_SURPRISE_REPLAY_TEST_MODE')) {
 
             if ($config !== []) {
                 $fallbackConfig = array_merge($fallbackConfig, [
-                    'dump_file' => $config['dump_file'] ?? null,
+                    'dump_file' => ($config['rehearse_migration_074'] ?? false) === true ? null : ($config['dump_file'] ?? null),
                     'base_url' => $config['base_url'] ?? null,
                     'index_page' => $config['index_page'] ?? null,
                     'start_date' => $config['start_date'] ?? null,
@@ -1568,7 +1570,7 @@ function runRestoreDumpStep(
             'baseline_blockers' => $baselineBlockers,
             'details' => [
                 'input_attestation' => 'unverified',
-                'substeps' => array_merge($substeps, $rehearsal['substeps']),
+                'substeps' => sanitizeRehearsalSubsteps(array_merge($substeps, $rehearsal['substeps'])),
                 'rehearsal' => 'migration_074_up_down_up',
                 'release_evidence' => false,
             ],
@@ -1648,6 +1650,16 @@ function runRestoreDumpStep(
             'substeps' => $substeps,
         ],
     ];
+}
+
+/** @param array<int,array<string,mixed>> $substeps @return array<int,array<string,mixed>> */
+function sanitizeRehearsalSubsteps(array $substeps): array
+{
+    foreach ($substeps as &$step) {
+        unset($step['command'], $step['stdout_tail'], $step['stderr_tail']);
+    }
+    unset($step);
+    return $substeps;
 }
 
 /**
@@ -2073,6 +2085,24 @@ function buildAppReadinessUrl(array $config): string
  * @param array<string, mixed>|null $dashboardReport
  * @return array<string, array{status:string,details:array<string, mixed>}>
  */
+/** @return array<string,array{status:string,details:array<string,mixed>}> */
+function collectMigration074Invariants(array $restoreStep): array
+{
+    $status = ($restoreStep['status'] ?? null) === ZeroSurpriseReport::STATUS_PASS
+        ? ZeroSurpriseReport::STATUS_PASS
+        : ZeroSurpriseReport::STATUS_FAIL;
+    return [
+        'migration_074_rehearsal' => [
+            'status' => $status,
+            'details' => [
+                'input_attestation' => 'unverified',
+                'release_evidence' => false,
+                'rehearsal' => 'up_down_up',
+            ],
+        ],
+    ];
+}
+
 function collectInvariants(?array $bookingReport, ?array $dashboardReport): array
 {
     return [
