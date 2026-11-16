@@ -11,10 +11,10 @@ rollback.
 Do not deploy production by editing files in-place or by turning the production
 application directory into the Git checkout.
 
-The web updater at `update` requires system-settings edit permission. GET and
-HEAD only display a confirmation page; its CSRF-protected POST initializes and
-runs the installed migrations. Opening the page does not update the database.
-The CLI migration path and the artifact deployment gates remain unchanged.
+The web `update` route requires system-settings edit permission and displays
+read-only operator guidance on GET and HEAD. POST and other methods are rejected
+with 405; browser requests never initialize or run migrations. Run pending
+database migrations through the protected CLI release procedure below.
 
 The intended flow is:
 
