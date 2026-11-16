@@ -156,6 +156,51 @@ class ZeroSurpriseReplayTest extends TestCase
         self::assertSame('not_required', $result['substeps'][1]['category']);
     }
 
+    public function testPredeployGateRejectsUnsupportedOrMalformedSchemaStates(): void
+    {
+        foreach ([
+            ['version' => 72, 'index_count' => 0, 'column' => null, 'non_unique' => null, 'seq_in_index' => null, 'sub_part' => null],
+            ['version' => null, 'index_count' => 0, 'column' => null, 'non_unique' => null, 'seq_in_index' => null, 'sub_part' => null],
+            ['version' => 74, 'index_count' => 1, 'column' => 'hash', 'non_unique' => 1, 'seq_in_index' => 1, 'sub_part' => 32],
+        ] as $invalid) {
+            $runner = static function (array $command, string $workingDirectory, int $timeoutSeconds) use ($invalid): array {
+                $joined = implode(' ', $command);
+                if (str_contains($joined, 'SHOW TABLES')) {
+                    return ['exit_code' => 0, 'stdout' => "ea_appointments\nea_migrations\n", 'stderr' => ''];
+                }
+                if (str_contains($joined, 'SELECT version')) {
+                    return ['exit_code' => 0, 'stdout' => ($invalid['version'] === null ? "not-a-version\n" : $invalid['version'] . "\n"), 'stderr' => ''];
+                }
+                return ['exit_code' => 0, 'stdout' => "5\t{$invalid['index_count']}\t{$invalid['column']}\t{$invalid['non_unique']}\t{$invalid['seq_in_index']}\t{$invalid['sub_part']}\n", 'stderr' => ''];
+            };
+
+            $result = runMigration074PredeployGate(['docker', 'compose'], '/repo', $runner);
+
+            self::assertSame('fail', $result['status']);
+            self::assertSame(2, $result['exit_code']);
+        }
+    }
+
+    public function testPredeployMigrationProjectionRedactsFailureCommandAndOutputInSerializedReport(): void
+    {
+        $projected = sanitizePredeployMigrationSubsteps([[
+            'name' => 'migrate_up',
+            'status' => 'fail',
+            'exit_code' => 1,
+            'command' => 'docker compose --dump-file=/private/backup.sql',
+            'stdout_tail' => 'secret stdout',
+            'stderr_tail' => 'password=top-secret',
+        ]]);
+        $report = new ZeroSurpriseReport('synthetic', 'zs-synthetic', [], '/tmp/synthetic.json', 'predeploy');
+        $report->addStep('restore_dump', 'fail', 2, 1.0, ['details' => ['substeps' => $projected]]);
+        $serialized = json_encode($report->toArray(), JSON_THROW_ON_ERROR);
+
+        self::assertStringNotContainsString('/private/backup.sql', $serialized);
+        self::assertStringNotContainsString('top-secret', $serialized);
+        self::assertStringContainsString('migrate_up', $serialized);
+        self::assertStringContainsString('"exit_code":1', $serialized);
+    }
+
     public function testPredeployGateFailsClosedWhenVersionCannotBeEstablished(): void
     {
         $runner = static fn(array $command, string $workingDirectory, int $timeoutSeconds): array =>

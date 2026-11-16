@@ -109,8 +109,9 @@ booking checks. A dump at version 073 must have both required tables, no
 `idx_appointments_hash`, and a stable appointment row count; it then runs the
 same exact `up`, `down`, `up` sequence and verifies the version, index shape,
 and row count after every step. Any missing or contradictory state fails closed
-before the ordinary migration step. A dump already at a newer version keeps the
-existing predeploy path and does not run this rehearsal.
+before the ordinary migration step. A structurally valid version-074 dump keeps
+the existing predeploy path and does not run this rehearsal; unsupported or
+malformed versions fail closed until this gate is explicitly extended.
 
 The predeploy report contains only bounded migration state and result classes.
 This local replay remains evidence about the supplied dump only. It becomes
