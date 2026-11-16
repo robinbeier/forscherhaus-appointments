@@ -102,6 +102,74 @@ class ZeroSurpriseReplayTest extends TestCase
         self::assertFalse($invariants['migration_074_rehearsal']['details']['release_evidence']);
     }
 
+    public function testPredeployGateRunsUpDownUpForVersion073BeforeContinuing(): void
+    {
+        $migrationCalls = 0;
+        $commands = [];
+        $runner = static function (array $command, string $workingDirectory, int $timeoutSeconds) use (&$migrationCalls, &$commands): array {
+            $joined = implode(' ', $command);
+            $commands[] = $joined;
+            if (str_contains($joined, 'console migrate')) {
+                $migrationCalls++;
+                return ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
+            }
+            if (str_contains($joined, 'SHOW TABLES')) {
+                return ['exit_code' => 0, 'stdout' => "ea_appointments\nea_migrations\n", 'stderr' => ''];
+            }
+            if (str_contains($joined, 'SELECT version')) {
+                return ['exit_code' => 0, 'stdout' => ($migrationCalls === 1 || $migrationCalls === 3 ? "74\n" : "73\n"), 'stderr' => ''];
+            }
+            $indexed = $migrationCalls === 1 || $migrationCalls === 3;
+            return ['exit_code' => 0, 'stdout' => "5\t" . ($indexed ? "1\thash\t1\t1\t64" : "0\t\t-1\t-1\t-1") . "\n", 'stderr' => ''];
+        };
+
+        $result = runMigration074PredeployGate(['docker', 'compose'], '/repo', $runner);
+
+        self::assertSame('pass', $result['status']);
+        self::assertSame(3, $migrationCalls);
+        self::assertSame(1, preg_match('/console migrate up.*console migrate down.*console migrate up/s', implode("\n", $commands)));
+        self::assertStringNotContainsString('/private', json_encode($result, JSON_THROW_ON_ERROR));
+    }
+
+    public function testPredeployGateKeepsVersion074PathWithoutRunningMigration(): void
+    {
+        $migrationCalls = 0;
+        $runner = static function (array $command, string $workingDirectory, int $timeoutSeconds) use (&$migrationCalls): array {
+            $joined = implode(' ', $command);
+            if (str_contains($joined, 'console migrate')) {
+                $migrationCalls++;
+                return ['exit_code' => 0, 'stdout' => '', 'stderr' => ''];
+            }
+            if (str_contains($joined, 'SHOW TABLES')) {
+                return ['exit_code' => 0, 'stdout' => "ea_appointments\nea_migrations\n", 'stderr' => ''];
+            }
+            if (str_contains($joined, 'SELECT version')) {
+                return ['exit_code' => 0, 'stdout' => "74\n", 'stderr' => ''];
+            }
+            return ['exit_code' => 0, 'stdout' => "5\t1\thash\t1\t1\t64\n", 'stderr' => ''];
+        };
+
+        $result = runMigration074PredeployGate(['docker', 'compose'], '/repo', $runner);
+
+        self::assertSame('pass', $result['status']);
+        self::assertSame(0, $migrationCalls);
+        self::assertSame('not_required', $result['substeps'][1]['category']);
+    }
+
+    public function testPredeployGateFailsClosedWhenVersionCannotBeEstablished(): void
+    {
+        $runner = static fn(array $command, string $workingDirectory, int $timeoutSeconds): array =>
+            str_contains(implode(' ', $command), 'SELECT version')
+                ? ['exit_code' => 1, 'stdout' => '', 'stderr' => 'private database detail']
+                : ['exit_code' => 0, 'stdout' => "ea_appointments\nea_migrations\n", 'stderr' => ''];
+
+        $result = runMigration074PredeployGate(['docker', 'compose'], '/repo', $runner);
+
+        self::assertSame('fail', $result['status']);
+        self::assertSame(70, $result['exit_code']);
+        self::assertStringNotContainsString('private database detail', json_encode($result, JSON_THROW_ON_ERROR));
+    }
+
     public function testTopLevelInvariantSelectionUsesDiagnosticModeAndReportMode(): void
     {
         $selected = collectReplayInvariants(

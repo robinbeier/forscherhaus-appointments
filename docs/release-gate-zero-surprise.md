@@ -101,6 +101,23 @@ The report marks `input_attestation` as `unverified` and
 readiness: a trusted operator must separately bind an attested backup dump to
 the deployment evidence authority before using any result for release work.
 
+### Migration 074 predeploy gate
+
+The ordinary `mode=predeploy` replay performs a bounded schema check immediately
+after importing the isolated dump and before its existing latest-migration and
+booking checks. A dump at version 073 must have both required tables, no
+`idx_appointments_hash`, and a stable appointment row count; it then runs the
+same exact `up`, `down`, `up` sequence and verifies the version, index shape,
+and row count after every step. Any missing or contradictory state fails closed
+before the ordinary migration step. A dump already at a newer version keeps the
+existing predeploy path and does not run this rehearsal.
+
+The predeploy report contains only bounded migration state and result classes.
+This local replay remains evidence about the supplied dump only. It becomes
+production-relevant only when a separately admitted, attested backup is bound
+by the protected deployment operator; the diagnostic or predeploy result alone
+never authorizes a live migration or release switch.
+
 Required keys:
 
 - `base_url`
