@@ -251,7 +251,7 @@ class Api
         $roles = $this->CI->db->dbprefix('roles');
         $role = empty($actor)
             ? []
-            : $this->CI->db->query("SELECT slug FROM {$roles} WHERE id = ?", [$actor['id_roles']])->row_array();
+            : $this->CI->db->query("SELECT slug FROM {$roles} WHERE id = ? FOR UPDATE", [$actor['id_roles']])->row_array();
 
         if (
             empty($actor) ||

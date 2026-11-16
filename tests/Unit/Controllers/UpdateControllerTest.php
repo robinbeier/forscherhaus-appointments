@@ -7,8 +7,8 @@ namespace Tests\Unit\Controllers;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Runs the real Update controller and view with parent, loader, security, instance, and helper doubles.
- * This does not prove real framework CSRF, HTTP, database, or migration behavior.
+ * Runs the real Update controller and view with parent, loader, and helper doubles.
+ * This does not prove real HTTP or database behavior.
  */
 final class UpdateControllerTest extends TestCase
 {
@@ -43,59 +43,41 @@ final class UpdateControllerTest extends TestCase
         self::assertNotContains('migrate', $forbiddenPost['events']);
     }
 
-    public function testAuthorizedGetAndHeadRenderConfirmationWithoutInitialization(): void
+    public function testAuthorizedGetAndHeadExplainOperatorMigrationWithoutInitialization(): void
     {
         foreach (['GET', 'HEAD'] as $method) {
             $result = $this->probe('authorized', $method);
             self::assertFalse($result['instance']);
             self::assertNotContains('library:instance', $result['events']);
             self::assertNotContains('migrate', $result['events']);
-            self::assertSame(
-                ['success' => null, 'csrf_token_name' => 'probe_csrf_name', 'csrf_token' => 'probe_csrf_hash'],
-                $result['view'],
-            );
-            self::assertStringContainsString('name="probe_csrf_name"', $result['rendered']);
-            self::assertStringContainsString('value="probe_csrf_hash"', $result['rendered']);
-            self::assertStringContainsString('method="post"', $result['rendered']);
-            self::assertStringContainsString('action="/update"', $result['rendered']);
+            self::assertSame([], $result['view']);
+            self::assertStringContainsString('applied by the server operator', $result['rendered']);
+            self::assertStringNotContainsString('<form', $result['rendered']);
         }
     }
 
-    public function testAuthorizedPostInitializesAndMigratesExactlyOnce(): void
+    public function testAuthorizedPostIsRejectedBeforeMigrationInitialization(): void
     {
         $result = $this->probe('authorized', 'POST');
-        self::assertSame(1, substr_count(implode('|', $result['events']), 'library:instance'));
-        self::assertSame(1, substr_count(implode('|', $result['events']), 'migrate'));
-        $authIndex = array_search('auth_check:edit:system_settings', $result['events'], true);
-        $libraryIndex = array_search('library:instance', $result['events'], true);
-        $migrateIndex = array_search('migrate', $result['events'], true);
-        self::assertIsInt($authIndex);
-        self::assertIsInt($libraryIndex);
-        self::assertIsInt($migrateIndex);
-        self::assertLessThan($libraryIndex, $authIndex);
-        self::assertLessThan($migrateIndex, $libraryIndex);
-        self::assertTrue($result['instance']);
-        self::assertSame(['success' => true], $result['view']);
+        self::assertSame(405, $result['status']);
+        self::assertSame('GET, HEAD', $result['headers']['Allow']);
+        self::assertFalse($result['instance']);
+        self::assertContains('auth_check:edit:system_settings', $result['events']);
+        self::assertNotContains('library:instance', $result['events']);
+        self::assertNotContains('migrate', $result['events']);
     }
 
-    public function testNonPostMethodsAreRejectedAndMigrationFailureDoesNotEscapeInView(): void
+    public function testAllOtherMethodsAreRejectedBeforeMigrationInitialization(): void
     {
-        foreach (['PUT', 'DELETE'] as $method) {
+        foreach (['PUT', 'DELETE', 'PATCH'] as $method) {
             $result = $this->probe('authorized', $method);
             self::assertFalse($result['instance']);
             self::assertNotContains('migrate', $result['events']);
             self::assertSame(405, $result['status']);
-            self::assertSame('GET, HEAD, POST', $result['headers']['Allow']);
+            self::assertSame('GET, HEAD', $result['headers']['Allow']);
             self::assertSame([], $result['view']);
             self::assertSame('', $result['rendered']);
         }
-        $failure = $this->probe('migration_failure', 'POST');
-        self::assertTrue($failure['instance']);
-        self::assertSame(1, substr_count(implode('|', $failure['events']), 'migrate'));
-        self::assertSame(['success' => false], $failure['view']);
-        self::assertStringNotContainsString('synthetic failure', $failure['rendered']);
-        self::assertStringNotContainsString('&lt;b&gt;', $failure['rendered']);
-        self::assertStringNotContainsString('<b>synthetic failure & note</b>', $failure['rendered']);
     }
 
     /** @return array{events:list<string>,view:array<string,mixed>,rendered:string,instance:bool,status:int,headers:array<string,string>} */

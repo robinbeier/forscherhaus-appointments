@@ -266,7 +266,7 @@ class Providers extends EA_Controller
                 if ($locked_actor === false) {
                     throw new RuntimeException('Could not lock provider create actor.');
                 }
-                if (!$locked_actor->row_array() || !$this->hasCurrentAddPermission($user_id)) {
+                if (!$locked_actor->row_array() || !can_with_locked_role('add', PRIV_USERS, $user_id)) {
                     if ($owns_transaction) {
                         $this->db->trans_rollback();
                         $owns_transaction = false;
@@ -446,7 +446,7 @@ class Providers extends EA_Controller
                 $users_by_id[(int) $row['id']] = $row;
             }
 
-            if (!isset($users_by_id[$user_id]) || cannot('edit', PRIV_USERS, $user_id)) {
+            if (!isset($users_by_id[$user_id]) || !can_with_locked_role('edit', PRIV_USERS, $user_id)) {
                 if ($owns_transaction) {
                     $this->db->trans_rollback();
                     $owns_transaction = false;
@@ -571,7 +571,7 @@ class Providers extends EA_Controller
                 $users_by_id[(int) $row['id']] = $row;
             }
 
-            if (!isset($users_by_id[$user_id]) || !$this->hasCurrentDeletePermission($user_id)) {
+            if (!isset($users_by_id[$user_id]) || !can_with_locked_role('delete', PRIV_USERS, $user_id)) {
                 if ($owns_transaction) {
                     $this->db->trans_rollback();
                     $owns_transaction = false;

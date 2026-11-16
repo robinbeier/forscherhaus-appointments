@@ -99,7 +99,7 @@
     {
       "component_id": "installation-bootstrap",
       "role": "Installation & Bootstrap",
-      "summary": "CLI installation, test-data bootstrap, and authenticated web updater.",
+      "summary": "CLI installation, test-data bootstrap, and read-only web migration guidance.",
       "primary_handle": "@robinbeier",
       "secondary_handle": "@robinbeier",
       "ownership_mode": "single-owner",

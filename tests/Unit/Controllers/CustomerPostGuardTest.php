@@ -49,8 +49,8 @@ final class CustomerPostGuardTest extends TestCase
                 $action === 'update' ? 'dto:customer' : 'dto:customer_id',
                 'trans_begin',
                 'lock_users:17,41',
-                'lock_appointments:41',
                 "auth:$verb:customers:17",
+                'lock_appointments:41',
                 'access:17:41',
             ];
         }
@@ -273,8 +273,8 @@ final class CustomerPostGuardTest extends TestCase
                     $action === 'update' ? 'dto:customer' : 'dto:customer_id',
                     'trans_begin',
                     'lock_users:17,41',
-                    'lock_appointments:41',
                     "auth:$verb:customers:17",
+                    'lock_appointments:41',
                     'access:17:41',
                     'trans_rollback',
                     'abort:403',

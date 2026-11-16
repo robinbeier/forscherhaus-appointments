@@ -22,6 +22,11 @@ function cannot(string $v, string $p, ?int $user_id = null): bool
     $events[] = "auth:$v:$p:" . ($user_id ?? 'session');
     return $scenario === 'forbidden';
 }
+// Controller handoff double; the real users->roles lock protocol has its own test.
+function can_with_locked_role(string $verb, string $permission, int $user_id): bool
+{
+    return !cannot($verb, $permission, $user_id);
+}
 function session(string $key): mixed
 {
     global $scenario, $events;

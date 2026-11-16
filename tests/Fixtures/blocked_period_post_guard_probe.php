@@ -28,6 +28,12 @@ function cannot(string $verb, string $permission, int $user_id): bool
             count(array_filter($events, static fn(string $event): bool => str_starts_with($event, 'auth:'))) > 1);
 }
 
+// Controller handoff double; the real users->roles lock protocol has its own test.
+function can_with_locked_role(string $verb, string $permission, int $user_id): bool
+{
+    return !cannot($verb, $permission, $user_id);
+}
+
 function abort(int $code, string $message = '', array $responseHeaders = []): never
 {
     global $events, $status, $headers;

@@ -267,9 +267,18 @@ final class CalendarUnavailabilityPermissionRaceHttpTest extends TestCase
             self::assertNotSame($ownerId, mysqli_thread_id($observer->conn_id));
             self::assertTrue($db->trans_begin());
             $transactionOpen = true;
-            self::assertNotFalse(
-                $db->query('SELECT * FROM `' . $db->dbprefix('appointments') . '` WHERE `id` = ' . $id . ' FOR UPDATE'),
-            );
+            if ($revoke) {
+                // The write path reserves the actor role before the appointment.
+                // Hold the role so revocation wins without reversing that order.
+                self::assertNotFalse($db->query(
+                    'SELECT `id` FROM `' . $db->dbprefix('roles') . '` WHERE `id` = ? FOR UPDATE',
+                    [(int) $this->providerRole['id']],
+                ));
+            } else {
+                self::assertNotFalse($db->query(
+                    'SELECT * FROM `' . $db->dbprefix('appointments') . '` WHERE `id` = ' . $id . ' FOR UPDATE',
+                ));
+            }
             $fields =
                 $action === 'edit'
                     ? [
@@ -288,7 +297,13 @@ final class CalendarUnavailabilityPermissionRaceHttpTest extends TestCase
                 $fields,
                 $multi,
             );
-            self::assertTrue($this->waitsFor($multi, $observer, $ownerId, 'appointments', $id));
+            self::assertTrue($this->waitsFor(
+                $multi,
+                $observer,
+                $ownerId,
+                $revoke ? 'roles' : 'appointments',
+                $revoke ? (int) $this->providerRole['id'] : $id,
+            ));
             if ($revoke) {
                 self::assertTrue(
                     (bool) $db->update(
@@ -304,13 +319,6 @@ final class CalendarUnavailabilityPermissionRaceHttpTest extends TestCase
             $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
             $after = $fixture->row('appointments', $id);
             if ($revoke) {
-                if ($status === 200) {
-                    if ($action === 'edit') {
-                        self::assertSame('2035-06-01 09:00:00', $after['start_datetime']);
-                    } else {
-                        self::assertSame([], $after);
-                    }
-                }
                 self::assertSame(403, $status);
                 self::assertSame($before, $after);
             } elseif ($action === 'edit') {

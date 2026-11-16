@@ -584,6 +584,10 @@ class Customers extends EA_Controller
             return false;
         }
 
+        if (!can_with_locked_role($action, PRIV_CUSTOMERS, $user_id)) {
+            return false;
+        }
+
         // The permission helper reads appointment relationships. Lock that same
         // customer scope before its first transaction-scoped nonlocking read.
         $locked_appointments = $this->db->query(
@@ -598,10 +602,6 @@ class Customers extends EA_Controller
         }
 
         try {
-            if (cannot($action, PRIV_CUSTOMERS, $user_id)) {
-                return false;
-            }
-
             $locked_limit_customer_access =
                 $this->permissions instanceof Permissions
                     ? $this->permissions->lock_customer_access_setting($user_id)
