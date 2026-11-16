@@ -32,7 +32,7 @@ class ZeroSurpriseReplayTest extends TestCase
             $indexed = $phase === 1 || $phase === 3;
             return [
                 'exit_code' => 0,
-                'stdout' => '5\t' . ($indexed ? '1\thash\t1\t1\t64' : '0\t\t-1\t-1\t-1') . "\n",
+                'stdout' => "5\t" . ($indexed ? "1\thash\t1\t1\t64" : "0\t\t-1\t-1\t-1") . "\n",
                 'stderr' => '',
             ];
         };
@@ -114,7 +114,9 @@ class ZeroSurpriseReplayTest extends TestCase
         self::assertArrayNotHasKey('overbooking', $selected);
 
         $report = new ZeroSurpriseReport('synthetic', 'zs-synthetic', [], '/tmp/synthetic.json', 'migration074-diagnostic');
-        self::assertSame('migration074-diagnostic', $report->toArray()['mode']);
+        self::assertSame('migration074-diagnostic', $report->toArray()['meta']['mode']);
+        $normal = new ZeroSurpriseReport('synthetic', 'zs-synthetic', [], '/tmp/synthetic.json');
+        self::assertSame('predeploy', $normal->toArray()['meta']['mode']);
     }
 
     public function testReplayOverlayUsesVerifiedMariaDbRestoreImageAndCredentials(): void
