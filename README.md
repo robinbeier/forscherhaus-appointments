@@ -249,19 +249,16 @@ bash ./scripts/cleanup_local_artifacts.sh --with-deps
 ### Git hooks
 
 `./scripts/setup-worktree.sh` installs the managed `.git/hooks/pre-commit`
-hook. The managed `pre-commit` runs fast formatting, syntax, and
-changed-frontend checks. Node dependencies are required only for formatting or
-frontend changes; the hook does not require Composer dependencies. PHP syntax
-checks use a temporary container without starting the application or installing
-its packages. Each host-side syntax check uses its own Compose project and
-removes it afterward without deleting volumes. Pure shell changes need neither
-dependency directory. The installer removes the old repository-managed
-`pre-push` hook while preserving custom hooks. Run
-`./scripts/install-git-hooks.sh` once in an existing clone to remove its old
-managed push hook. Invoke
+hook. The automatic hook performs only staged-file policy and whitespace
+checks; it does not execute scripts, package managers, interpreters, or
+containers from the active checkout. Run
 `bash ./scripts/ci/pre_pr_quick.sh` or
-`PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` explicitly according to
-[WORKFLOW.md](WORKFLOW.md#3-validate-locally); pushing does not rerun them.
+`PRE_PR_RUN_COVERAGE=1 bash ./scripts/ci/pre_pr_full.sh` for formatting, syntax,
+frontend, and runtime validation. The installer removes the old repository-managed
+`pre-push` hook while preserving custom hooks. Run
+`./scripts/install-git-hooks.sh` once in an existing clone to replace its
+installed `pre-commit` copy and remove its old managed push hook. Follow the explicit validation path in
+[WORKFLOW.md](WORKFLOW.md#3-validate-locally); pushing does not rerun it.
 Linux root/host tests use the explicit Docker Desktop skip versus required
 GitHub Actions failure contract documented in
 [Linux root/host tests](docs/docker.md#linux-roothost-tests); local skips never
