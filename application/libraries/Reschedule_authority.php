@@ -410,17 +410,11 @@ class Reschedule_authority
                 'options' => ['min_range' => 0],
             ]);
             $timezone = new DateTimeZone($provider_timezone);
-            $start = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $start_datetime, $timezone);
-            $parse_errors = DateTimeImmutable::getLastErrors();
-
-            if (
-                $timeout === false ||
-                $start === false ||
-                $start->format('Y-m-d H:i:s') !== $start_datetime ||
-                ($parse_errors !== false && ($parse_errors['warning_count'] > 0 || $parse_errors['error_count'] > 0))
-            ) {
+            if ($timeout === false) {
                 return true;
             }
+
+            $start = self::parseStrictProviderWallTime($start_datetime, $timezone);
 
             $current = ($now ?? new DateTimeImmutable('now', $timezone))->setTimezone($timezone);
             $current = $current->setTime(
@@ -435,6 +429,60 @@ class Reschedule_authority
         } catch (Throwable) {
             return true;
         }
+    }
+
+    /**
+     * Parse a stored offset-free provider wall time without selecting an
+     * arbitrary occurrence during a daylight-saving transition.
+     */
+    public static function parseStrictProviderWallTime(
+        string $wall_time,
+        DateTimeZone $timezone,
+    ): DateTimeImmutable {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/D', $wall_time)) {
+            throw new InvalidArgumentException('Provider wall time is not canonical.');
+        }
+
+        $parsed = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $wall_time, $timezone);
+        $errors = DateTimeImmutable::getLastErrors();
+
+        if (
+            $parsed === false ||
+            ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0)) ||
+            $parsed->format('Y-m-d H:i:s') !== $wall_time
+        ) {
+            throw new InvalidArgumentException('Provider wall time is invalid.');
+        }
+
+        $offsets = [$parsed->getOffset()];
+        $transitions = $timezone->getTransitions(
+            $parsed->getTimestamp() - 604800,
+            $parsed->getTimestamp() + 604800,
+        );
+        if (is_array($transitions)) {
+            foreach ($transitions as $transition) {
+                $offsets[] = (int) $transition['offset'];
+            }
+        }
+
+        $wall_as_utc = DateTimeImmutable::createFromFormat(
+            '!Y-m-d H:i:s',
+            $wall_time,
+            new DateTimeZone('UTC'),
+        );
+        $matching_instants = 0;
+        foreach (array_unique($offsets) as $offset) {
+            $instant = $wall_as_utc->getTimestamp() - $offset;
+            if ((new DateTimeImmutable('@' . $instant))->setTimezone($timezone)->format('Y-m-d H:i:s') === $wall_time) {
+                ++$matching_instants;
+            }
+        }
+
+        if ($matching_instants !== 1) {
+            throw new InvalidArgumentException('Provider wall time is ambiguous or nonexistent.');
+        }
+
+        return $parsed;
     }
 
     /**

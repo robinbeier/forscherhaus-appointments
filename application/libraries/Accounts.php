@@ -53,7 +53,7 @@ class Accounts
             ->select(
                 'user_settings.id_users, user_settings.username, user_settings.password, user_settings.salt, ' .
                     'users.id AS user_id, users.email AS user_email, users.timezone AS user_timezone, ' .
-                    'users.language AS user_language, users.credential_version, roles.slug AS role_slug',
+                    'users.language AS user_language, users.ldap_dn, users.credential_version, roles.slug AS role_slug',
             )
             ->from('user_settings')
             ->join('users', 'users.id = user_settings.id_users', 'inner')
@@ -77,11 +77,16 @@ class Accounts
         $stored_password = (string) ($user_settings['password'] ?? '');
         $salt = (string) ($user_settings['salt'] ?? '');
 
-        if (!$this->verify_login_password($stored_password, $salt, $password) || empty($user_settings)) {
+        $local_password_valid = $this->verify_login_password($stored_password, $salt, $password);
+        if (!$local_password_valid || empty($user_settings)) {
             return null;
         }
 
-        if (MODERN_PASSWORD_WRITES && password_hash_needs_rehash($stored_password)) {
+        if (
+            MODERN_PASSWORD_WRITES &&
+            (string) ($user_settings['ldap_dn'] ?? '') === '' &&
+            password_hash_needs_rehash($stored_password)
+        ) {
             $new_password = hash_password_argon2id($password);
             $new_salt = generate_salt();
 
@@ -111,7 +116,7 @@ class Accounts
             ->select(
                 'user_settings.id_users, user_settings.username, user_settings.password, user_settings.salt, ' .
                     'users.id AS user_id, users.email AS user_email, users.timezone AS user_timezone, ' .
-                    'users.language AS user_language, users.credential_version, roles.slug AS role_slug',
+                    'users.language AS user_language, users.ldap_dn, users.credential_version, roles.slug AS role_slug',
             )
             ->from('user_settings')
             ->join('users', 'users.id = user_settings.id_users', 'inner')
@@ -123,8 +128,17 @@ class Accounts
             !$current ||
             !hash_equals((string) $user_settings['username'], (string) $current['username']) ||
             !hash_equals((string) $user_settings['password'], (string) $current['password']) ||
-            !hash_equals((string) $user_settings['salt'], (string) $current['salt'])
+            !hash_equals((string) $user_settings['salt'], (string) $current['salt']) ||
+            !hash_equals((string) ($user_settings['ldap_dn'] ?? ''), (string) ($current['ldap_dn'] ?? '')) ||
+            (int) ($user_settings['credential_version'] ?? 0) !== (int) ($current['credential_version'] ?? 0)
         ) {
+            return null;
+        }
+
+        // Directory-managed accounts must authenticate against LDAP. Keep the
+        // local verifier above so browser login can fall through to LDAP with
+        // equivalent password work, while API Basic authentication fails closed.
+        if ((string) ($current['ldap_dn'] ?? '') !== '') {
             return null;
         }
 

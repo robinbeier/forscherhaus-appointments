@@ -268,6 +268,22 @@ final class SecretariesModelAtomicWriteTest extends TestCase
         self::assertSame($before + 1, (int) $db->get_where('users', ['id' => $secretaryId])->row('credential_version'));
     }
 
+    public function test_username_only_update_advances_credential_version(): void
+    {
+        $secretaryId = $this->secretariesModel->save($this->secretaryData([]));
+        $this->createdUserIds[] = $secretaryId;
+        $before = (int) get_instance()->db->get_where('users', ['id' => $secretaryId])->row('credential_version');
+
+        $changed = $this->secretariesModel->find($secretaryId);
+        $changed['settings']['username'] = $changed['settings']['username'] . '-renamed';
+        $this->secretariesModel->save($changed);
+
+        self::assertSame(
+            $before + 1,
+            (int) get_instance()->db->get_where('users', ['id' => $secretaryId])->row('credential_version'),
+        );
+    }
+
     public function test_settings_failure_after_mutation_rolls_back_insert_and_update(): void
     {
         $model = $this->failingModel('settings');

@@ -124,6 +124,52 @@ final class LoginMethodHttpTest extends TestCase
         }
     }
 
+    public function testLdapLinkedAccountCannotCreateSessionWithRetainedLocalPassword(): void
+    {
+        $fixture = $this->fixture();
+        $server = $this->server();
+        $db = \get_instance()->db;
+        $actor = $db->get_where('users', ['id' => $fixture->actorId])->row_array();
+        $settings = $db->where_in('name', ['ldap_is_active'])->get('settings')->result_array();
+
+        try {
+            self::assertNotEmpty($actor);
+            self::assertTrue($db->update('settings', ['value' => '0'], ['name' => 'ldap_is_active']));
+            self::assertTrue(
+                $db->update(
+                    'users',
+                    ['ldap_dn' => 'uid=' . $fixture->run . ',ou=people,dc=invalid'],
+                    ['id' => $fixture->actorId],
+                ),
+            );
+
+            foreach ($this->routes($server) as [$client, $endpoint, $calendarPath, $loginPath]) {
+                /** @var GateHttpClient $client */
+                self::assertSame(200, $client->get($loginPath)->statusCode);
+                $beforeLoginCookie = $client->getCookie((string) config('sess_cookie_name'));
+                $response = $client->post($endpoint, [
+                    'username' => $fixture->run . '_actor',
+                    'password' => $fixture->password,
+                ]);
+                $data = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+
+                self::assertSame(200, $response->statusCode, $response->body);
+                self::assertFalse((bool) ($data['success'] ?? true), $response->body);
+                self::assertSame($beforeLoginCookie, $client->getCookie((string) config('sess_cookie_name')));
+                $this->assertAnonymous($client, $calendarPath);
+            }
+        } finally {
+            foreach ($settings as $row) {
+                self::assertTrue($db->update('settings', ['value' => $row['value']], ['name' => $row['name']]));
+            }
+            if ($actor) {
+                self::assertTrue(
+                    $db->update('users', ['ldap_dn' => $actor['ldap_dn'] ?? null], ['id' => $fixture->actorId]),
+                );
+            }
+        }
+    }
+
     public function testSuccessfulLoginRotatesSessionAndRejectsThePreLoginCookie(): void
     {
         $fixture = $this->fixture();

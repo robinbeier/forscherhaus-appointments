@@ -48,6 +48,30 @@ final class ProvidersModelLockOrderTest extends TestCase
         self::assertContains('bump_credential_version', $database->events);
         self::assertArrayNotHasKey('credential_version', $database->lastUserUpdate);
     }
+
+    public function testUsernameOnlyUpdateBumpsCredentialVersion(): void
+    {
+        $database = new ProvidersModelLockOrderFakeDatabase();
+        $CI = &get_instance();
+        $originalDb = $CI->db;
+        $CI->db = $database;
+
+        try {
+            $model = new ProvidersModelLockOrderTestModel();
+            $model->callUpdate([
+                'id' => 42,
+                'first_name' => 'Synthetic',
+                'last_name' => 'Provider',
+                'email' => 'provider@synthetic.invalid',
+                'services' => [],
+                'settings' => ['username' => 'renamed-provider'],
+            ]);
+        } finally {
+            $CI->db = $originalDb;
+        }
+
+        self::assertContains('bump_credential_version', $database->events);
+    }
 }
 
 final class ProvidersModelLockOrderTestModel extends Providers_model
@@ -126,6 +150,10 @@ final class ProvidersModelLockOrderFakeDatabase
         if (str_contains($sql, 'id_roles') && str_contains($sql, 'FROM `ea_users`')) {
             $this->events[] = 'target_lock';
             return new ProvidersModelLockOrderFakeQuery([['id_roles' => 7]]);
+        }
+
+        if (str_contains($sql, 'FROM `ea_user_settings`') && str_contains($sql, 'FOR UPDATE')) {
+            return new ProvidersModelLockOrderFakeQuery([['username' => 'provider']]);
         }
 
         if (str_contains($sql, 'FROM `ea_services`') && str_contains($sql, 'FOR UPDATE')) {

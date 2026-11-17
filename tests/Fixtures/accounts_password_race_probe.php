@@ -56,14 +56,22 @@ $format = $argv[1] ?? 'legacy';
 $rotate = ($argv[3] ?? '') === 'reset';
 $mode = $argv[4] ?? '';
 $duplicate = $mode === 'duplicate';
-$ci->db = new class ($format, $rotate, $duplicate) {
+$ldapLinked = $mode === 'ldap';
+$linkDuringVerify = $mode === 'ldap-transition';
+$ci->db = new class ($format, $rotate, $duplicate, $ldapLinked, $linkDuringVerify) {
     public array $row;
     public int $reads = 0;
     public int $affected = 0;
     public array $predicate = [];
     /** @var array<string, mixed> */
     private array $queryWhere = [];
-    public function __construct(string $format, private bool $rotate, private bool $duplicate)
+    public function __construct(
+        string $format,
+        private bool $rotate,
+        private bool $duplicate,
+        bool $ldapLinked,
+        private bool $linkDuringVerify,
+    )
     {
         $this->row = [
             'id_users' => 1,
@@ -72,6 +80,7 @@ $ci->db = new class ($format, $rotate, $duplicate) {
             'user_timezone' => 'UTC',
             'user_language' => 'english',
             'credential_version' => 0,
+            'ldap_dn' => $ldapLinked ? 'uid=synthetic,ou=people,dc=invalid' : '',
             'role_slug' => 'admin',
             'username' => 'synthetic',
             'salt' => 'salt',
@@ -125,6 +134,11 @@ $ci->db = new class ($format, $rotate, $duplicate) {
             $this->row['password'] = hash_password_argon2id('replacement-password');
             $this->rotate = false;
         }
+        if ($this->linkDuringVerify) {
+            $this->row['ldap_dn'] = 'uid=synthetic,ou=people,dc=invalid';
+            ++$this->row['credential_version'];
+            $this->linkDuringVerify = false;
+        }
         return new class ($row, $this->duplicate && $this->reads === 1) {
             public function __construct(private array $row, private bool $duplicate) {}
             public function row_array(): array
@@ -167,6 +181,11 @@ echo json_encode(
             $ci->db->row['password'],
             $ci->db->row['salt'],
             'replacement-password',
+        ),
+        'original_preserved' => verify_password(
+            $ci->db->row['password'],
+            $ci->db->row['salt'],
+            'old-password',
         ),
         'modern' => str_starts_with($ci->db->row['password'], '$argon2id$'),
     ],

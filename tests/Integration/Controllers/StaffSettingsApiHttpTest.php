@@ -859,6 +859,60 @@ final class StaffSettingsApiHttpTest extends TestCase
         self::assertSame(200, $fresh->get('account')->statusCode);
     }
 
+    public static function usernameOnlyStaffTargets(): array
+    {
+        return [['provider'], ['secretary']];
+    }
+
+    #[DataProvider('usernameOnlyStaffTargets')]
+    public function testUsernameOnlyStaffUpdateInvalidatesPreExistingTargetSession(string $role): void
+    {
+        $admin = $this->writeClient('basic');
+        $payload = $role === 'provider'
+            ? $this->fixture->providerWritePayload('session-username-' . $role)
+            : $this->fixture->secretaryWritePayload('session-username-' . $role, [$this->fixture->providerId]);
+        $endpoint = $role === 'provider' ? 'providers' : 'secretaries';
+        $created = $this->success($admin->requestJsonApp('POST', 'api/v1/' . $endpoint, $payload), 201);
+        $targetId = (int) $created['id'];
+        $target = $this->server->client();
+        self::assertSame(200, $target->get('login')->statusCode);
+        $login = $target->post('login/validate', [
+            'username' => $payload['settings']['username'],
+            'password' => $this->credentials['password'],
+        ]);
+        self::assertSame(200, $login->statusCode);
+        self::assertTrue((bool) (json_decode($login->body, true, 512, JSON_THROW_ON_ERROR)['success'] ?? false));
+
+        $beforeVersion = (int) ($this->fixture->row('users', $targetId)['credential_version'] ?? 0);
+        $originalUsername = $payload['settings']['username'];
+        $payload['settings']['username'] .= '-renamed';
+        unset($payload['settings']['password']);
+
+        $behaviorFailure = null;
+        try {
+            $response = $admin->requestJsonApp('PUT', 'api/v1/' . $endpoint . '/' . $targetId, $payload);
+            self::assertSame(200, $response->statusCode, $response->body);
+            self::assertSame(
+                $beforeVersion + 1,
+                (int) ($this->fixture->row('users', $targetId)['credential_version'] ?? 0),
+            );
+            self::assertSame(403, $target->get('account')->statusCode);
+        } catch (Throwable $error) {
+            $behaviorFailure = $error;
+        } finally {
+            // DefenseCycleFixtures tracks the originally registered username for
+            // bounded teardown; restore it even when a behavioral assertion fails.
+            $payload['settings']['username'] = $originalUsername;
+            $restore = $admin->requestJsonApp('PUT', 'api/v1/' . $endpoint . '/' . $targetId, $payload);
+            if ($behaviorFailure === null) {
+                self::assertSame(200, $restore->statusCode, $restore->body);
+            }
+        }
+        if ($behaviorFailure !== null) {
+            throw $behaviorFailure;
+        }
+    }
+
     public function testAdminPutRejectsMismatchedOrInvalidBodyIdWithoutPartialChange(): void
     {
         $f = $this->fixture;

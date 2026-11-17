@@ -108,6 +108,15 @@ class BookingCancellationControllerFlowTest extends TestCase
         $this->invokeCancellationCutoff('2026-03-29 02:30:00', $timezone, 60, $now);
     }
 
+    public function testCancellationCutoffRejectsAmbiguousProviderFallBackTime(): void
+    {
+        $timezone = new DateTimeZone('Europe/Berlin');
+        $now = new DateTimeImmutable('2026-10-24 10:00:00', $timezone);
+
+        $this->expectException(RuntimeException::class);
+        $this->invokeCancellationCutoff('2026-10-25 02:30:00', $timezone, 60, $now);
+    }
+
     private function createCancellationController(): Booking_cancellation
     {
         $controller = new class extends Booking_cancellation {

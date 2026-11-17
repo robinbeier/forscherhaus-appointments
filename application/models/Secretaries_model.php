@@ -426,6 +426,16 @@ class Secretaries_model extends EA_Model
             throw new RuntimeException('Could not lock secretary before update.');
         }
 
+        $current_settings = $this->db
+            ->query(
+                'SELECT `username` FROM `' . $this->db->dbprefix('user_settings') . '` WHERE `id_users` = ? FOR UPDATE',
+                [$secretary['id']],
+            )
+            ->row_array();
+        if (empty($current_settings)) {
+            throw new RuntimeException('Could not read secretary settings before update.');
+        }
+
         $secretary['update_datetime'] = date('Y-m-d H:i:s');
 
         $provider_ids = $secretary['providers'] ?? [];
@@ -440,6 +450,9 @@ class Secretaries_model extends EA_Model
         if (!array_key_exists('ldap_dn', $secretary)) {
             unset($secretary['ldap_dn']);
         }
+        $username_changed =
+            array_key_exists('username', $settings) &&
+            (string) $settings['username'] !== (string) ($current_settings['username'] ?? '');
 
         $password_changed = isset($settings['password']);
         if ($password_changed) {
@@ -461,7 +474,7 @@ class Secretaries_model extends EA_Model
         }
 
         $this->set_settings($secretary['id'], $settings);
-        if ($password_changed || $ldap_dn_changed) {
+        if ($password_changed || $ldap_dn_changed || $username_changed) {
             $this->bump_credential_version((int) $secretary['id']);
         }
         $this->set_provider_ids($secretary['id'], $provider_ids);
