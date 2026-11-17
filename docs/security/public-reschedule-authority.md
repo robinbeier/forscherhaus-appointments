@@ -35,8 +35,15 @@ end time older than this conservative margin current again.
 The aggregate checks are an explicit prerequisite of this rollout, not evidence
 that arbitrary older installations have no affected appointments. Repeat them
 against the actual release and preserve their timestamps in the private release
-record. Privacy tokens from the earlier cache namespace are rejected by the
-new consumer; rollback requires a page reload for tokens issued by newer code.
+record. The ROB-494 first-rollout contract recorded rejection of the earlier
+privacy-token namespace; ROB-952 supersedes that transition rule. Current code
+issues v3 tokens in the bounded `customer-token-v3-{appointmentId}` entry and
+checks the exact token against the appointment's current customer. Already-open
+v2 pages remain compatible for their existing 600-second TTL, while no new v2
+tokens are issued. A rollback to pre-v3 code requires reloading pages issued by
+the newer code. If a v3 authority transaction fails, compensation restores the
+prior v3 entry with its remaining absolute lifetime when that predecessor is
+still valid, and otherwise removes the new entry.
 
 ## Pre-change authority and write path
 

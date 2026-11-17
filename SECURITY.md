@@ -412,10 +412,16 @@ with a fresh 256-bit value under the appointment lock. Ordinary future changes
 for the same customer preserve the stored hash, regardless of caller-supplied
 hash fields. Schedule changes to safely aged-out appointments also rotate the
 hash under the documented upgrade prerequisite. Authority issuance checks that hash again under the canonical locks
-so an earlier lookup cannot authorize a replacement customer. Privacy tokens
-use the `customer-token-v2-` namespace; pre-upgrade tokens require a page reload
-and are not accepted by the new consumer. Rollback likewise requires reloading
-pages whose privacy tokens were issued by the newer code.
+so an earlier lookup cannot authorize a replacement customer. Current page
+loads issue v3 privacy tokens shaped as
+`v3-{appointmentId}-{43-character-random}` and store one current entry under
+`customer-token-v3-{appointmentId}`. Deletion checks the exact token and then
+rechecks the appointment's current customer. Already-open v2 pages remain
+accepted through their existing 600-second TTL in the separate legacy
+namespace; no new v2 tokens are issued. A rollback to pre-v3 code requires
+reloading pages issued by the newer code. If a v3 authority transaction fails,
+cache compensation restores the previous v3 entry with its remaining absolute
+lifetime when available, otherwise it removes the new entry.
 
 The authenticated calendar page may preload up to 50 recent customers the
 current staff member may view and access according to the persisted role;
