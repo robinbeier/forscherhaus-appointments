@@ -70,9 +70,9 @@ Bei v3-Löschungen sperrt das Modell den Kunden sowie dessen Termine und den
 tokengebundenen Zieltermin in ID-Reihenfolge. Unter diesen Sperren prüft es die
 aktuelle Zuordnung zum gespeicherten Kunden; der exakte aktuelle Cache-Token
 wird vor jeder Mutation erneut gelesen. Eine andere ID aus dem Request kann
-keine Berechtigung übernehmen. Bereits geöffnete v2-Seiten
-bleiben für ihre vorhandene 600-Sekunden-TTL im getrennten
-`customer-token-v2-`-Namensraum kompatibel; neue v2-Tokens werden nicht mehr
+keine Berechtigung übernehmen. Bereits geöffnete v2-Seiten müssen vor einer
+Löschung neu geladen werden: Ihre Cache-Einträge enthalten keine Termin-ID für
+die Transaktionsprüfung. Bestehende v2-Tokens werden abgelehnt und neue nicht
 ausgestellt. Ein Rollback auf Code vor v3 erfordert das Neuladen neuerer Seiten.
 Scheitert die v3-Transaktion, stellt die Kompensation den vorherigen v3-Eintrag
 mit seiner verbleibenden absoluten TTL wieder her oder löscht den neuen Eintrag,

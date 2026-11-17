@@ -91,6 +91,7 @@ final class PrivacyDeleteHttpTest extends TestCase
         $client = $server->client();
         $token = $this->customerToken($client, (string) $appointment['hash']);
         $cacheKeys = [$this->customerTokenCacheKey($token)];
+        $compatibilityCustomer = null;
 
         try {
             $directClient = new \ReleaseGate\GateHttpClient($server->baseUrl, '');
@@ -167,10 +168,19 @@ final class PrivacyDeleteHttpTest extends TestCase
             $this->cacheToken($compatibilityToken, $compatibilityCustomer, 600);
             $cacheKeys[] = 'customer-token-v2-' . $compatibilityToken;
             $compatibility = $client->post(self::ENDPOINT, ['customer_token' => $compatibilityToken]);
-            self::assertSame(200, $compatibility->statusCode);
-            self::assertSame([], $fixture->row('users', $compatibilityCustomer));
+            self::assertSame(500, $compatibility->statusCode);
+            self::assertStringNotContainsString('"success":true', $compatibility->body);
+            self::assertNotSame([], $fixture->row('users', $compatibilityCustomer));
+            self::assertSame($before, $this->ownedState($appointment, $buffer));
         } finally {
-            $this->deleteCacheKeys($cacheKeys);
+            try {
+                $this->deleteCacheKeys($cacheKeys);
+            } finally {
+                if ($compatibilityCustomer !== null) {
+                    self::assertTrue(get_instance()->db->delete('users', ['id' => $compatibilityCustomer]));
+                    self::assertSame([], $fixture->row('users', $compatibilityCustomer));
+                }
+            }
         }
     }
 

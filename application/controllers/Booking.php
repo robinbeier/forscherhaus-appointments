@@ -26,7 +26,6 @@ class Booking extends EA_Controller
     private const MAX_UNAVAILABLE_DATES_PROVIDER_DAY_WORK = 512;
     private const MAX_AVAILABLE_HOURS_ANY_PROVIDER_WORK = 64;
 
-    private const CUSTOMER_TOKEN_CACHE_PREFIX = 'customer-token-v2-';
     private const CUSTOMER_TOKEN_V3_CACHE_PREFIX = 'customer-token-v3-';
     public Reschedule_authority $reschedule_authority;
 

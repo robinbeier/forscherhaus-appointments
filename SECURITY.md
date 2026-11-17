@@ -418,9 +418,10 @@ loads issue v3 privacy tokens shaped as
 `customer-token-v3-{appointmentId}`. Deletion locks the customer and the token's
 appointment together with its current appointment scope, then rechecks the
 appointment/customer relationship and exact current cache token before any
-mutation. Already-open v2 pages remain
-accepted through their existing 600-second TTL in the separate legacy
-namespace; no new v2 tokens are issued. A rollback to pre-v3 code requires
+mutation. Already-open v2 pages must reload before deletion: v2 cache entries
+contain only a customer ID and cannot prove the issuing appointment still
+belongs to that customer inside the deletion transaction. No new v2 tokens are
+issued. A rollback to pre-v3 code requires
 reloading pages issued by the newer code. If a v3 authority transaction fails,
 cache compensation restores the previous v3 entry with its remaining absolute
 lifetime when available, otherwise it removes the new entry.

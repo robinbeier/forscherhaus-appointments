@@ -20,7 +20,6 @@
  */
 class Privacy extends EA_Controller
 {
-    private const CUSTOMER_TOKEN_CACHE_PREFIX = 'customer-token-v2-';
     private const CUSTOMER_TOKEN_V3_CACHE_PREFIX = 'customer-token-v3-';
     /**
      * Privacy constructor.
@@ -103,12 +102,6 @@ class Privacy extends EA_Controller
                             (int) ($current['appointment_id'] ?? 0) === $appointment_id;
                     };
                 }
-            } elseif (preg_match('/\A[a-f0-9]{64}\z/D', $customer_token) === 1) {
-                // Compatibility for already-open v2 pages. Those legacy
-                // random-key files remain bounded by their 600-second TTL;
-                // old expired files may persist until the existing cache
-                // driver's natural cleanup/read path.
-                $customer_id = $cache->get(self::CUSTOMER_TOKEN_CACHE_PREFIX . $customer_token);
             }
 
             if (empty($customer_id)) {
