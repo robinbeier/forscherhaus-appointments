@@ -391,6 +391,16 @@ final class RescheduleAuthorityLockOrderTest extends TestCase
         $this->assertTrue($authority->isAdvanceCutoffReached('2026-01-15 10:00:00', -1, 'Europe/Berlin', $now));
     }
 
+    public function testAdvanceCutoffFailsClosedForAmbiguousProviderFallBackTime(): void
+    {
+        $authority = $this->createAuthority(new RescheduleAuthorityLockOrderFakeDatabase());
+        $now = new \DateTimeImmutable('2026-10-24 10:00:00', new \DateTimeZone('Europe/Berlin'));
+
+        $this->assertTrue(
+            $authority->isAdvanceCutoffReached('2026-10-25 02:30:00', 60, 'Europe/Berlin', $now),
+        );
+    }
+
     public function testAdvanceCutoffMatchesProviderWallClockAcrossDstTransition(): void
     {
         $authority = $this->createAuthority(new RescheduleAuthorityLockOrderFakeDatabase());

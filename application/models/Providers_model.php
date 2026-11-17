@@ -491,6 +491,15 @@ class Providers_model extends EA_Model
             $provider['update_datetime'] = date('Y-m-d H:i:s');
             $service_ids = $this->normalize_update_service_ids($provider['services']);
             $settings = $provider['settings'];
+            $current_settings = $this->db
+                ->query(
+                    'SELECT `username` FROM `' . $this->db->dbprefix('user_settings') . '` WHERE `id_users` = ? FOR UPDATE',
+                    [$provider['id']],
+                )
+                ->row_array();
+            if (empty($current_settings)) {
+                throw new RuntimeException('Could not read provider settings before update.');
+            }
             unset($provider['services'], $provider['settings'], $provider['credential_version']);
             // Never write a caller-supplied credential version back during
             // metadata updates; credential changes are advanced below.
@@ -500,6 +509,9 @@ class Providers_model extends EA_Model
             if (!array_key_exists('ldap_dn', $provider)) {
                 unset($provider['ldap_dn']);
             }
+            $username_changed =
+                array_key_exists('username', $settings) &&
+                (string) $settings['username'] !== (string) ($current_settings['username'] ?? '');
 
             // Service deletion locks its parent before cascading to these associations.
             // Keep the same order before replacing the provider's connections.
@@ -527,7 +539,7 @@ class Providers_model extends EA_Model
             }
 
             $this->set_settings($provider['id'], $settings);
-            if ($password_changed || $ldap_dn_changed) {
+            if ($password_changed || $ldap_dn_changed || $username_changed) {
                 $this->bump_credential_version((int) $provider['id']);
             }
             try {

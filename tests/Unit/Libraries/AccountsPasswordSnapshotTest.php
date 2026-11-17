@@ -43,6 +43,25 @@ final class AccountsPasswordSnapshotTest extends TestCase
         }
     }
 
+    public function testLdapLinkedAccountNeverAuthenticatesWithRetainedLocalVerifier(): void
+    {
+        foreach (['legacy', 'modern'] as $format) {
+            $result = $this->probe($format, 'reader', 'stable', 'ldap');
+            self::assertFalse($result['authenticated'], $format);
+            self::assertSame(2, $result['reads'], $format);
+            self::assertTrue($result['original_preserved'], $format);
+        }
+    }
+
+    public function testLdapLinkAndCredentialVersionDriftDuringVerificationInvalidatesLogin(): void
+    {
+        $result = $this->probe('legacy', 'reader', 'stable', 'ldap-transition');
+
+        self::assertFalse($result['authenticated']);
+        self::assertSame(2, $result['reads']);
+        self::assertTrue($result['original_preserved']);
+    }
+
     private function probe(string $format, string $phase, string $change, string $mode = ''): array
     {
         $process = proc_open(

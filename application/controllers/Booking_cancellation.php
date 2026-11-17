@@ -191,15 +191,12 @@ class Booking_cancellation extends EA_Controller
         int $advance_timeout,
         DateTimeImmutable $now,
     ): bool {
-        $start = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $start_datetime, $provider_timezone);
-        $parse_errors = DateTimeImmutable::getLastErrors();
+        require_once APPPATH . 'libraries/Reschedule_authority.php';
 
-        if (
-            $start === false ||
-            $start->format('Y-m-d H:i:s') !== $start_datetime ||
-            ($parse_errors !== false && ($parse_errors['warning_count'] > 0 || $parse_errors['error_count'] > 0))
-        ) {
-            throw new RuntimeException('Invalid cancellation deadline.');
+        try {
+            $start = Reschedule_authority::parseStrictProviderWallTime($start_datetime, $provider_timezone);
+        } catch (InvalidArgumentException $exception) {
+            throw new RuntimeException('Invalid cancellation deadline.', 0, $exception);
         }
 
         $current = $now->setTimezone($provider_timezone);
