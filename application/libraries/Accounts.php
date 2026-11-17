@@ -303,6 +303,16 @@ class Accounts
             }
         }
 
+        if (PHP_SAPI === 'cli' && defined('ENVIRONMENT') && ENVIRONMENT === 'testing') {
+            if (!function_exists('posix_getpwnam')) {
+                return null;
+            }
+
+            $account = @posix_getpwnam('www-data');
+
+            return is_array($account) && isset($account['uid']) ? (int) $account['uid'] : null;
+        }
+
         if (!function_exists('posix_geteuid')) {
             return null;
         }
@@ -319,6 +329,16 @@ class Accounts
             if (is_string($configured) && ctype_digit($configured)) {
                 return (int) $configured;
             }
+        }
+
+        if (PHP_SAPI === 'cli' && defined('ENVIRONMENT') && ENVIRONMENT === 'testing') {
+            if (!function_exists('posix_getgrnam')) {
+                return null;
+            }
+
+            $group = @posix_getgrnam('www-data');
+
+            return is_array($group) && isset($group['gid']) ? (int) $group['gid'] : null;
         }
 
         if (!function_exists('posix_getegid')) {

@@ -36,10 +36,20 @@ $webUid = function_exists('posix_geteuid') ? (int) posix_geteuid() : 0;
 $webGid = function_exists('posix_getegid') ? (int) posix_getegid() : 0;
 $slotUid = $webUid;
 $slotGid = $webGid;
+if ($probeMode === 'cli-default') {
+    $webAccount = function_exists('posix_getpwnam') ? @posix_getpwnam('www-data') : false;
+    $webGroup = function_exists('posix_getgrnam') ? @posix_getgrnam('www-data') : false;
+    if (!is_array($webAccount) || !is_array($webGroup)) {
+        fwrite(STDERR, "www-data account unavailable\n");
+        exit(1);
+    }
+    $slotUid = (int) $webAccount['uid'];
+    $slotGid = (int) $webGroup['gid'];
+}
 if ($probeMode === 'runtime-mismatch') {
     putenv('EA_LOGIN_KDF_SLOT_UID=' . ($webUid === 0 ? 1 : 0));
     putenv('EA_LOGIN_KDF_SLOT_GID=' . ($webGid === 0 ? 1 : 0));
-} elseif ($probeMode !== 'runtime-identity') {
+} elseif ($probeMode !== 'cli-default') {
     putenv('EA_LOGIN_KDF_SLOT_UID=' . $slotUid);
     putenv('EA_LOGIN_KDF_SLOT_GID=' . $slotGid);
 }

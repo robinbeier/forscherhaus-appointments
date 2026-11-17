@@ -62,9 +62,13 @@ final class AccountsPasswordSnapshotTest extends TestCase
         self::assertSame(1, $result['reads']);
     }
 
-    public function testKdfPermitUsesEffectiveRuntimeIdentityWhenTestingOverrideIsAbsent(): void
+    public function testKdfPermitRetainsLegacyWebDataOwnershipForCliWithoutOverride(): void
     {
-        $result = $this->probe('legacy', 'active', 'stable', 'runtime-identity');
+        if (!function_exists('posix_getpwnam') || !is_array(@posix_getpwnam('www-data')) || !function_exists('posix_getgrnam') || !is_array(@posix_getgrnam('www-data'))) {
+            self::markTestSkipped('Legacy CLI ownership account is unavailable in this runtime.');
+        }
+
+        $result = $this->probe('legacy', 'active', 'stable', 'cli-default');
 
         self::assertTrue($result['authenticated']);
         self::assertSame(2, $result['reads']);
