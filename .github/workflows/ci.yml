@@ -490,6 +490,10 @@ jobs:
           bash scripts/ci/wait_for_mysql_readiness.sh
           docker compose run --rm --user root -T php-fpm bash -lc '
             set -euo pipefail
+            # The isolated PHP test server inherits this root CLI process,
+            # while the container startup provisions KDF slots for www-data.
+            export EA_LOGIN_KDF_SLOT_UID="$(id -u www-data)"
+            export EA_LOGIN_KDF_SLOT_GID="$(id -g www-data)"
             composer install --no-interaction --no-progress
             test ! -e config.php
             install -m 0600 config-sample.php config.php

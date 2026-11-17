@@ -49,6 +49,9 @@ jobs provision four synthetic login KDF lock slots before authentication tests.
 The CI-only helper uses the same root-owned directory and runner-owned slot
 permissions as the deployed runtime, then exports the runner UID/GID for CLI
 test processes. Docker-backed jobs use their own container startup provisioner.
+The root-run calendar canary suite explicitly passes the provisioned `www-data`
+UID/GID to its isolated PHP test server, which otherwise inherits the root
+test process.
 
 The `calendar-canary-regressions` job runs the calendar authorization,
 zero-surprise canary, Customers UI fixture lifecycle, Provider UI fixture
