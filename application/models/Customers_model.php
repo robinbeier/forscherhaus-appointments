@@ -381,8 +381,12 @@ class Customers_model extends EA_Model
      *
      * @throws RuntimeException
      */
-    public function delete(int $customer_id): void
+    public function delete(int $customer_id, ?int $privacy_appointment_id = null, ?callable $privacy_token_is_current = null): void
     {
+        if (($privacy_appointment_id === null) !== ($privacy_token_is_current === null)) {
+            throw new InvalidArgumentException('Incomplete privacy deletion authority.');
+        }
+
         if (!$this->db->trans_begin()) {
             throw new RuntimeException('Could not start customer delete transaction.');
         }
@@ -390,7 +394,14 @@ class Customers_model extends EA_Model
         try {
             $customer_role_id = $this->get_customer_role_id();
             $this->assert_customer_exists_for_update($customer_id);
-            $this->lock_customer_appointment_parents($customer_id);
+            if ($privacy_appointment_id !== null) {
+                $this->lock_privacy_appointment_parents($customer_id, $privacy_appointment_id);
+                if ($privacy_token_is_current === null || !$privacy_token_is_current()) {
+                    throw new InvalidArgumentException('Customer token is no longer current.');
+                }
+            } else {
+                $this->lock_customer_appointment_parents($customer_id);
+            }
 
             $this->delete_buffer_blocks_for_customer($customer_id);
 
@@ -427,6 +438,42 @@ class Customers_model extends EA_Model
                 '` WHERE `id_users_customer` = ? AND `is_unavailability` = 0 ORDER BY `id` FOR UPDATE',
             [$customer_id],
         );
+    }
+
+    /**
+     * Lock the whole deletion scope and the token's target in one ID order.
+     * A concurrent reassignment may move the target outside the customer scope;
+     * the extra target row makes that drift visible before any delete.
+     */
+    private function lock_privacy_appointment_parents(int $customer_id, int $appointment_id): void
+    {
+        if ($appointment_id <= 0) {
+            throw new InvalidArgumentException('Invalid privacy appointment ID.');
+        }
+
+        $query = $this->db->query(
+            'SELECT `id`, `id_users_customer`, `is_unavailability` FROM `' .
+                $this->db->dbprefix('appointments') .
+                '` WHERE (`id_users_customer` = ? AND `is_unavailability` = 0) OR `id` = ? ORDER BY `id` FOR UPDATE',
+            [$customer_id, $appointment_id],
+        );
+
+        if (!is_object($query) || !method_exists($query, 'result_array')) {
+            throw new RuntimeException('Could not lock privacy appointment scope.');
+        }
+
+        $target_is_current = false;
+        foreach ($query->result_array() as $row) {
+            if ((int) ($row['id'] ?? 0) === $appointment_id) {
+                $target_is_current =
+                    (int) ($row['id_users_customer'] ?? 0) === $customer_id &&
+                    (int) ($row['is_unavailability'] ?? 1) === 0;
+            }
+        }
+
+        if (!$target_is_current) {
+            throw new InvalidArgumentException('Privacy appointment/customer relationship changed.');
+        }
     }
 
     /**

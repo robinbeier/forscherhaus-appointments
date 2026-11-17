@@ -66,9 +66,11 @@ die aktivierte Produkteinstellung. Der Lösch-Token entsteht auf der
 Reschedule-Seite aus kryptografisch sicheren 32 Zufallsbytes. Neue Seiten
 verwenden die Form `v3-{appointmentId}-{43 Zeichen}` und einen einzelnen
 Cache-Eintrag unter `customer-token-v3-{appointmentId}` mit 600 Sekunden TTL.
-Beim Löschen werden der exakte aktuelle Token, die Appointment-ID und die
-aktuelle Zuordnung zum gespeicherten Kunden erneut geprüft; eine andere ID aus
-dem Request kann keine Berechtigung übernehmen. Bereits geöffnete v2-Seiten
+Bei v3-Löschungen sperrt das Modell den Kunden sowie dessen Termine und den
+tokengebundenen Zieltermin in ID-Reihenfolge. Unter diesen Sperren prüft es die
+aktuelle Zuordnung zum gespeicherten Kunden; der exakte aktuelle Cache-Token
+wird vor jeder Mutation erneut gelesen. Eine andere ID aus dem Request kann
+keine Berechtigung übernehmen. Bereits geöffnete v2-Seiten
 bleiben für ihre vorhandene 600-Sekunden-TTL im getrennten
 `customer-token-v2-`-Namensraum kompatibel; neue v2-Tokens werden nicht mehr
 ausgestellt. Ein Rollback auf Code vor v3 erfordert das Neuladen neuerer Seiten.

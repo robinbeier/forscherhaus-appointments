@@ -334,6 +334,179 @@ final class PrivacyDeleteHttpTest extends TestCase
         }
     }
 
+    public function testV3DeleteRechecksAppointmentCustomerAfterConcurrentReassignment(): void
+    {
+        $fixture = $this->fixture;
+        $server = $this->server;
+        self::assertNotNull($fixture);
+        self::assertNotNull($server);
+
+        $db = get_instance()->db;
+        $appointment = $fixture->appointment();
+        $buffer = $this->addBuffer($appointment);
+        $before = $this->ownedState($appointment, $buffer);
+        $client = $server->client();
+        $token = $this->customerToken($client, (string) $appointment['hash']);
+        $cacheKey = $this->customerTokenCacheKey($token);
+        $foreignCustomer = null;
+        $observer = null;
+        $multi = null;
+        $handle = null;
+        $transactionOpen = false;
+
+        try {
+            $customerRole = $db->get_where('roles', ['slug' => 'customer'])->row_array();
+            self::assertNotEmpty($customerRole);
+            self::assertTrue($db->insert('users', [
+                'first_name' => 'Synthetic',
+                'last_name' => 'privacy-race-foreign',
+                'email' => $fixture->run . '_privacy-race-foreign@synthetic.invalid',
+                'phone_number' => '000000000',
+                'notes' => $fixture->run,
+                'timezone' => 'UTC',
+                'language' => 'english',
+                'id_roles' => (int) $customerRole['id'],
+                'is_private' => 0,
+            ]));
+            $foreignCustomer = (int) $db->insert_id();
+
+            $observer = get_instance()->load->database([
+                'hostname' => 'mysql', 'username' => 'root', 'password' => 'secret',
+                'database' => 'easyappointments', 'dbdriver' => 'mysqli',
+                'dbprefix' => $db->dbprefix, 'pconnect' => false, 'db_debug' => false,
+                'char_set' => 'utf8mb4', 'dbcollat' => 'utf8mb4_general_ci',
+            ], true);
+            $ownerId = mysqli_thread_id($db->conn_id);
+            self::assertNotSame($ownerId, mysqli_thread_id($observer->conn_id));
+            self::assertTrue($db->trans_begin());
+            $transactionOpen = true;
+            self::assertTrue($db->update('appointments', [
+                'id_users_customer' => $foreignCustomer,
+            ], ['id' => (int) $appointment['id']]));
+
+            $multi = curl_multi_init();
+            $handle = $this->startPrivacyDeleteRequest($server, $client, $token, $multi);
+            $waiting = false;
+            $deadline = microtime(true) + 8;
+            do {
+                self::assertSame(CURLM_OK, curl_multi_exec($multi, $running));
+                $waiting = $this->observesWait($observer, $ownerId, $db->dbprefix('appointments'));
+                if ($waiting || $running === 0) {
+                    break;
+                }
+                curl_multi_select($multi, 0.05);
+            } while (microtime(true) < $deadline);
+            self::assertTrue($waiting, 'Privacy deletion must wait for the reassigned appointment lock.');
+
+            self::assertTrue($db->trans_commit());
+            $transactionOpen = false;
+            self::assertTrue($this->drain($multi, $handle));
+            self::assertSame(500, (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE));
+            self::assertStringNotContainsString('"success":true', (string) curl_multi_getcontent($handle));
+            self::assertSame($before['customer'], $fixture->row('users', $fixture->customerId));
+            self::assertSame($before['buffer'], $fixture->row('appointments', (int) $buffer['id']));
+            self::assertSame($before['provider'], $fixture->row('users', $fixture->providerId));
+            self::assertSame($before['admin'], $fixture->row('users', $fixture->actorId));
+            self::assertSame($before['service'], $fixture->row('services', $fixture->serviceId));
+            self::assertSame(
+                $foreignCustomer,
+                (int) ($fixture->row('appointments', (int) $appointment['id'])['id_users_customer'] ?? 0),
+            );
+        } finally {
+            if ($transactionOpen && $db->trans_active()) {
+                $db->trans_rollback();
+            }
+            if ($multi instanceof CurlMultiHandle && $handle instanceof CurlHandle) {
+                $this->drain($multi, $handle);
+                curl_multi_remove_handle($multi, $handle);
+            }
+            if ($handle instanceof CurlHandle) {
+                curl_close($handle);
+            }
+            if ($multi instanceof CurlMultiHandle) {
+                curl_multi_close($multi);
+            }
+            if (is_object($observer) && isset($observer->conn_id)) {
+                $observer->close();
+            }
+            if ($foreignCustomer !== null) {
+                $db->update('appointments', ['id_users_customer' => $fixture->customerId], ['id' => (int) $appointment['id']]);
+                $db->delete('users', ['id' => $foreignCustomer]);
+            }
+            $this->deleteCacheKeys([$cacheKey]);
+        }
+    }
+
+    private function startPrivacyDeleteRequest(
+        DefenseCycleHttpServer $server,
+        \ReleaseGate\GateHttpClient $client,
+        string $token,
+        CurlMultiHandle $multi,
+    ): CurlHandle {
+        $cookies = array_map(
+            static fn(array $record): string => $record['name'] . '=' . $record['value'],
+            $client->cookieRecords(),
+        );
+        $handle = curl_init($server->baseUrl . '/index.php/' . self::ENDPOINT);
+        self::assertInstanceOf(CurlHandle::class, $handle);
+        curl_setopt_array($handle, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => http_build_query([
+                'customer_token' => $token,
+                'csrf_token' => $client->getCookie('csrf_cookie'),
+            ]),
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_HTTPHEADER => [
+                'Accept: application/json',
+                'Content-Type: application/x-www-form-urlencoded',
+                'Cookie: ' . implode('; ', $cookies),
+            ],
+        ]);
+        self::assertSame(CURLM_OK, curl_multi_add_handle($multi, $handle));
+        return $handle;
+    }
+
+    private function observesWait(object $observer, int $ownerId, string $table): bool
+    {
+        $result = $observer->query(
+            'SELECT l.OBJECT_NAME, COALESCE(s.SQL_TEXT, r.PROCESSLIST_INFO) AS statement_text ' .
+                'FROM performance_schema.data_lock_waits w ' .
+                'JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID ' .
+                'JOIN performance_schema.threads b ON b.THREAD_ID = w.BLOCKING_THREAD_ID ' .
+                'JOIN performance_schema.threads r ON r.THREAD_ID = w.REQUESTING_THREAD_ID ' .
+                'LEFT JOIN performance_schema.events_statements_current s ON s.THREAD_ID = r.THREAD_ID ' .
+                'WHERE b.PROCESSLIST_ID = ' . $ownerId,
+        );
+        self::assertNotFalse($result);
+        foreach ($result->result_array() as $row) {
+            if (
+                $row['OBJECT_NAME'] === $table &&
+                str_contains(strtoupper((string) $row['statement_text']), 'FOR UPDATE')
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function drain(CurlMultiHandle $multi, CurlHandle $handle): bool
+    {
+        $deadline = microtime(true) + 8;
+        do {
+            if (curl_multi_exec($multi, $running) !== CURLM_OK) {
+                return false;
+            }
+            if ($running === 0) {
+                return curl_errno($handle) === CURLE_OK;
+            }
+            curl_multi_select($multi, 0.05);
+        } while (microtime(true) < $deadline);
+        return false;
+    }
+
     private function customerToken(\ReleaseGate\GateHttpClient $client, string $hash): string
     {
         $response = $client->get('booking/reschedule/' . rawurlencode($hash));

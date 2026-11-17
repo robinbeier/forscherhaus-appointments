@@ -415,8 +415,10 @@ hash under the documented upgrade prerequisite. Authority issuance checks that h
 so an earlier lookup cannot authorize a replacement customer. Current page
 loads issue v3 privacy tokens shaped as
 `v3-{appointmentId}-{43-character-random}` and store one current entry under
-`customer-token-v3-{appointmentId}`. Deletion checks the exact token and then
-rechecks the appointment's current customer. Already-open v2 pages remain
+`customer-token-v3-{appointmentId}`. Deletion locks the customer and the token's
+appointment together with its current appointment scope, then rechecks the
+appointment/customer relationship and exact current cache token before any
+mutation. Already-open v2 pages remain
 accepted through their existing 600-second TTL in the separate legacy
 namespace; no new v2 tokens are issued. A rollback to pre-v3 code requires
 reloading pages issued by the newer code. If a v3 authority transaction fails,
@@ -676,7 +678,8 @@ During public reschedule GET, the cache token is created from the customer ID
 revalidated under the appointment row lock, before that authority transaction
 commits. This keeps a concurrent reassignment from minting a deletion token for
 the former customer; tokens already issued remain governed by the existing
-ten-minute expiry and deletion checks.
+ten-minute expiry and deletion checks. A v3 token never authorizes deletion
+after its appointment moves to another customer or is replaced by a newer token.
 Wrong methods, missing or invalid authority, and replay after a successful
 deletion must leave customer and dependent records unchanged. See the
 [privacy deletion contract](docs/ci-write-contracts.md#offentliche-datenschutz-loschung)

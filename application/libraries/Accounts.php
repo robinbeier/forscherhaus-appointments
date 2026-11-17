@@ -221,7 +221,7 @@ class Accounts
         $lockRootStat = @stat($lockRoot);
         $expectedRootUid = 0;
         $expectedRootGid = 0;
-        if (PHP_SAPI === 'cli' && defined('ENVIRONMENT') && ENVIRONMENT === 'testing') {
+        if (in_array(PHP_SAPI, ['cli', 'cli-server'], true) && defined('ENVIRONMENT') && ENVIRONMENT === 'testing') {
             $configuredUid = getenv('EA_LOGIN_KDF_LOCK_ROOT_UID');
             $configuredGid = getenv('EA_LOGIN_KDF_LOCK_ROOT_GID');
             if (is_string($configuredUid) && ctype_digit($configuredUid)) {
@@ -296,14 +296,14 @@ class Accounts
 
     private function webUserId(): ?int
     {
-        if (PHP_SAPI === 'cli' && defined('ENVIRONMENT') && ENVIRONMENT === 'testing') {
+        if (in_array(PHP_SAPI, ['cli', 'cli-server'], true) && defined('ENVIRONMENT') && ENVIRONMENT === 'testing') {
             $configured = getenv('EA_LOGIN_KDF_SLOT_UID');
             if (is_string($configured) && ctype_digit($configured)) {
                 return (int) $configured;
             }
         }
 
-        if (PHP_SAPI === 'cli' && defined('ENVIRONMENT') && ENVIRONMENT === 'testing') {
+        if (in_array(PHP_SAPI, ['cli', 'cli-server'], true) && defined('ENVIRONMENT') && ENVIRONMENT === 'testing') {
             if (!function_exists('posix_getpwnam')) {
                 return null;
             }
@@ -324,14 +324,14 @@ class Accounts
 
     private function webGroupId(): ?int
     {
-        if (PHP_SAPI === 'cli' && defined('ENVIRONMENT') && ENVIRONMENT === 'testing') {
+        if (in_array(PHP_SAPI, ['cli', 'cli-server'], true) && defined('ENVIRONMENT') && ENVIRONMENT === 'testing') {
             $configured = getenv('EA_LOGIN_KDF_SLOT_GID');
             if (is_string($configured) && ctype_digit($configured)) {
                 return (int) $configured;
             }
         }
 
-        if (PHP_SAPI === 'cli' && defined('ENVIRONMENT') && ENVIRONMENT === 'testing') {
+        if (in_array(PHP_SAPI, ['cli', 'cli-server'], true) && defined('ENVIRONMENT') && ENVIRONMENT === 'testing') {
             if (!function_exists('posix_getgrnam')) {
                 return null;
             }

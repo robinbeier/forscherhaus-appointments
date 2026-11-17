@@ -30,7 +30,6 @@ class Privacy extends EA_Controller
         parent::__construct();
 
         $this->load->model('customers_model');
-        $this->load->model('appointments_model');
     }
 
     /**
@@ -65,6 +64,8 @@ class Privacy extends EA_Controller
             }
 
             $customer_id = null;
+            $privacy_appointment_id = null;
+            $privacy_token_is_current = null;
 
             // v3 keeps one bounded cache entry per appointment while retaining
             // a fresh random token for every page view. The exact token is
@@ -84,13 +85,23 @@ class Privacy extends EA_Controller
                     (int) $entry['appointment_id'] === $appointment_id &&
                     (string) (int) $entry['appointment_id'] === $matches[1]
                 ) {
-                    $appointment = $this->appointments_model->find($appointment_id);
-                    if (
-                        is_array($appointment) &&
-                        (int) ($appointment['id_users_customer'] ?? 0) === (int) $entry['customer_id']
-                    ) {
-                        $customer_id = (int) $entry['customer_id'];
-                    }
+                    $customer_id = (int) $entry['customer_id'];
+                    $privacy_appointment_id = $appointment_id;
+                    $privacy_token_is_current = static function () use (
+                        $cache,
+                        $matches,
+                        $customer_token,
+                        $customer_id,
+                        $appointment_id,
+                    ): bool {
+                        $current = $cache->get(self::CUSTOMER_TOKEN_V3_CACHE_PREFIX . $matches[1]);
+
+                        return is_array($current) &&
+                            is_string($current['token'] ?? null) &&
+                            hash_equals($current['token'], $customer_token) &&
+                            (int) ($current['customer_id'] ?? 0) === $customer_id &&
+                            (int) ($current['appointment_id'] ?? 0) === $appointment_id;
+                    };
                 }
             } elseif (preg_match('/\A[a-f0-9]{64}\z/D', $customer_token) === 1) {
                 // Compatibility for already-open v2 pages. Those legacy
@@ -106,7 +117,7 @@ class Privacy extends EA_Controller
                 );
             }
 
-            $this->customers_model->delete($customer_id);
+            $this->customers_model->delete($customer_id, $privacy_appointment_id, $privacy_token_is_current);
 
             json_response([
                 'success' => true,
