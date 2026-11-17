@@ -6,7 +6,7 @@ ENV XDG_CONFIG_HOME=/tmp/chromium-config \
 
 WORKDIR /app
 
-COPY --chown=node:node package.json package-lock.json* ./
+COPY --chown=node:node package.json package-lock.json* install-chrome.mjs ./
 
 RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci --omit=dev \
     && apt-get update \
@@ -18,13 +18,13 @@ RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci --omit=dev \
         fonts-noto-core \
         fonts-noto-color-emoji \
         unzip \
-    && npx puppeteer browsers install chrome --install-deps \
+    && node install-chrome.mjs \
     && mkdir -p "$PUPPETEER_CACHE_DIR" \
     && chown -R node:node "$PUPPETEER_CACHE_DIR" \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --chown=node:node server.js server.test.js concurrency.js concurrency.test.js ./
+COPY --chown=node:node server.js server.test.js concurrency.js concurrency.test.js integrity.test.js ./
 
 USER node
 

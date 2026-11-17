@@ -370,11 +370,21 @@ be checked separately before a release.
 
 The renderer image uses `node:24.22.3-bookworm-slim` pinned by digest and installs only the Chrome
 revision selected by `pdf-renderer/package-lock.json`. Automatic Puppeteer
-browser downloads are disabled during `npm ci`; the explicit Chrome install
-also installs its Debian runtime dependencies. The build retains the configured
+browser downloads are disabled during `npm ci`; `pdf-renderer/install-chrome.mjs`
+uses Puppeteer's archive installer with the committed SHA-256
+`55672d1f392fd3e7b7a08621b6e804e6bcb39d40cf155504abb74b3a021ea8ea` for the
+Chrome-for-Testing `155.0.8059.39` `linux64` archive. The installer checks the
+Puppeteer revision and host architecture before downloading, and verifies the
+archive before extraction; a mismatch fails the image build. The explicit Chrome
+install also installs its Debian runtime dependencies. The build retains the configured
 DejaVu, Liberation and Noto fonts, discards package caches, and runs as the
 unprivileged `node` user with `PUPPETEER_CACHE_DIR=/home/node/.cache/puppeteer`.
 Update the lockfile to update Puppeteer and its matching browser together.
+
+The renderer is intentionally built for `linux/amd64`, matching the Compose
+service's `platform` setting. Chrome-for-Testing does not publish the pinned
+revision as a Linux ARM64 archive, so ARM hosts should use Docker's amd64
+emulation rather than relaxing the integrity check.
 
 Chromium remains the rendering engine because the existing exports use CSS
 Grid/Flexbox and JavaScript-assisted shared logos. A switch to a non-browser
