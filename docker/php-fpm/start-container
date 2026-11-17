@@ -16,6 +16,11 @@ fi
 # Restrict the bind-mounted parent before classifying its children. PHP-FPM
 # writes within the prepared runtime children and its separate session volume.
 chmod 0755 storage
+if [[ -L /var/www/html/.fh-login-kdf || ( -e /var/www/html/.fh-login-kdf && ! -d /var/www/html/.fh-login-kdf ) ]]; then
+    echo "✖ Refusing invalid login KDF lock directory" >&2
+    exit 1
+fi
+mkdir -p /var/www/html/.fh-login-kdf
 if ! symlinked_storage_child="$(find -P storage -mindepth 1 -maxdepth 1 ! -name sessions -type l -print -quit)"; then
     echo "✖ Could not inspect storage children" >&2
     exit 1
@@ -34,6 +39,28 @@ done
 # the web worker. Other runtime directories retain their existing permissions.
 chmod 0700 storage/backups
 chmod 0777 storage/{cache,logs,uploads}
+chown root:root /var/www/html/.fh-login-kdf
+chmod 0755 /var/www/html/.fh-login-kdf
+for slot_file in /var/www/html/.fh-login-kdf/slot-{0..3}.lock; do
+    if [[ -L "$slot_file" || -d "$slot_file" || ( -e "$slot_file" && ! -f "$slot_file" ) ]]; then
+        echo "✖ Refusing invalid login KDF slot: $slot_file" >&2
+        exit 1
+    fi
+    if [[ -e "$slot_file" && "$(stat -c '%h' "$slot_file")" != 1 ]]; then
+        echo "✖ Refusing hardlinked login KDF slot: $slot_file" >&2
+        exit 1
+    fi
+    touch "$slot_file"
+    chown www-data:www-data "$slot_file"
+    chmod 0600 "$slot_file"
+    web_uid="$(id -u www-data)"
+    web_gid="$(id -g www-data)"
+    slot_stat="$(stat -c '%u:%g:%a:%h:%F' "$slot_file")"
+    [[ "$slot_stat" == "${web_uid}:${web_gid}:600:1:regular empty file" || "$slot_stat" == "${web_uid}:${web_gid}:600:1:regular file" ]] || {
+        echo "✖ Invalid login KDF slot metadata: $slot_file" >&2
+        exit 1
+    }
+done
 
 echo "➜ Prepare Private Session Volume"
 if [[ -L storage/sessions ]] || ! mountpoint -q storage/sessions; then

@@ -43,6 +43,25 @@ final class AccountsPasswordSnapshotTest extends TestCase
         }
     }
 
+    public function testKdfPermitSaturationFailsClosedBeforeAnyCredentialWork(): void
+    {
+        $result = $this->probe('legacy', 'active', 'stable', 'capacity');
+
+        self::assertTrue($result['capacity_denied']);
+        self::assertFalse($result['authenticated']);
+        self::assertSame(1, $result['reads'], 'Capacity denial happens after bounded account lookup but before KDF work.');
+        self::assertFalse($result['modern'], 'Capacity denial must happen before legacy password rehash.');
+    }
+
+    public function testKdfPermitRejectsHardlinkedSlotBeforeCredentialWork(): void
+    {
+        $result = $this->probe('legacy', 'active', 'stable', 'hardlink');
+
+        self::assertTrue($result['capacity_denied']);
+        self::assertFalse($result['authenticated']);
+        self::assertSame(1, $result['reads']);
+    }
+
     public function testLdapLinkedAccountNeverAuthenticatesWithRetainedLocalVerifier(): void
     {
         foreach (['legacy', 'modern'] as $format) {

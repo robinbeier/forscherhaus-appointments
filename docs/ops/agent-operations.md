@@ -127,6 +127,28 @@ Current accepted baseline:
 - Uptime Kuma: Docker Compose project `uptime-kuma`, bound to `127.0.0.1:3001`
 - Host Node/npm: intentionally absent while artifact deploy remains in use
 
+Release-dependent runtime resource (observed absent before deployment on
+2026-11-17):
+
+The stable login KDF path is `/var/www/html/.fh-login-kdf`. It is a
+root-controlled runtime resource, not release content. `deploy_ea.sh` prepares
+it before an atomic release switch and keeps the four `www-data`-owned `0600`
+slot files in place across stage preparation, activation, and rollback.
+The PHP-FPM hardening boundary already permits writes under `/var/www/html`;
+the path remains available when
+`/var/www/html/easyappointments` is renamed. Local Docker startup creates the
+same directory for the bind-mounted development tree. The files contain no
+secrets and must not be copied into a release archive or application backup.
+
+For a production change, include this resource in the redacted preflight:
+confirm the directory is a non-symlink `0755` directory owned by `root`,
+each slot is a non-hardlinked regular `0600` file owned by `www-data`, and the
+device/inode pair for every slot is unchanged after stage normalization. If any
+check is open or contradictory, stop before the release switch and repair only
+through the root-controlled deployment helper. Runtime authentication refuses
+to do password work when the path is missing or unsafe; that refusal is a
+protective failure state, not evidence that the resource has been deployed.
+
 Log and signal sources:
 
 - Apache logs: `/var/log/apache2`

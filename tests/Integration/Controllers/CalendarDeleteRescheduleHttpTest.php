@@ -251,11 +251,11 @@ final class CalendarDeleteRescheduleHttpTest extends TestCase
         }
 
         $files = [];
-        foreach (glob($cachePath . DIRECTORY_SEPARATOR . 'customer-token-v2-*') ?: [] as $path) {
+        foreach (glob($cachePath . DIRECTORY_SEPARATOR . 'customer-token-v3-*') ?: [] as $path) {
             if (
                 !is_file($path) ||
                 is_link($path) ||
-                !preg_match('/^customer-token-v2-[a-f0-9]{64}$/', basename($path))
+                !preg_match('/^customer-token-v3-[1-9][0-9]{0,18}$/', basename($path))
             ) {
                 continue;
             }
@@ -263,7 +263,8 @@ final class CalendarDeleteRescheduleHttpTest extends TestCase
             $entry = $raw === false ? false : @unserialize($raw, ['allowed_classes' => false]);
             if (
                 !is_array($entry) ||
-                ($entry['data'] ?? null) !== $fixture->customerId ||
+                !is_array($entry['data'] ?? null) ||
+                (int) ($entry['data']['customer_id'] ?? 0) !== $fixture->customerId ||
                 ($entry['ttl'] ?? null) !== 600
             ) {
                 continue;

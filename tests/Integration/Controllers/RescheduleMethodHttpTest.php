@@ -76,18 +76,28 @@ final class RescheduleMethodHttpTest extends TestCase
         $page = $client->get($path);
 
         self::assertSame(200, $page->statusCode, $page->body);
-        $authority = $this->authorityRow((int) $appointment['id']);
-        self::assertSame((int) $appointment['id'], (int) ($authority['appointment_id'] ?? 0));
-        self::assertSame($fixture->customerId, (int) ($authority['customer_id'] ?? 0));
-        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', (string) ($authority['token_digest'] ?? ''));
-        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', (string) ($authority['snapshot_digest'] ?? ''));
-        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', (string) ($authority['context_digest'] ?? ''));
-        self::assertGreaterThan(time(), strtotime((string) $authority['expires_at']));
+        $initialAuthority = $this->authorityRow((int) $appointment['id']);
+        self::assertSame((int) $appointment['id'], (int) ($initialAuthority['appointment_id'] ?? 0));
+        self::assertSame($fixture->customerId, (int) ($initialAuthority['customer_id'] ?? 0));
+        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', (string) ($initialAuthority['token_digest'] ?? ''));
+        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', (string) ($initialAuthority['snapshot_digest'] ?? ''));
+        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', (string) ($initialAuthority['context_digest'] ?? ''));
+        self::assertGreaterThan(time(), strtotime((string) $initialAuthority['expires_at']));
 
         $vars = $this->scriptVars($page->body);
         $customerToken = (string) ($vars['customer_token'] ?? '');
-        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $customerToken);
+        self::assertMatchesRegularExpression('/^v3-[1-9][0-9]{0,18}-[A-Za-z0-9_-]{43}$/', $customerToken);
         self::assertSame($fixture->customerId, $this->customerTokenValue($customerToken));
+
+        $refresh = $client->get($path);
+        self::assertSame(200, $refresh->statusCode, $refresh->body);
+        $refreshVars = $this->scriptVars($refresh->body);
+        $refreshToken = (string) ($refreshVars['customer_token'] ?? '');
+        self::assertMatchesRegularExpression('/^v3-[1-9][0-9]{0,18}-[A-Za-z0-9_-]{43}$/', $refreshToken);
+        self::assertNotSame($customerToken, $refreshToken);
+        self::assertSame($fixture->customerId, $this->customerTokenValue($refreshToken));
+        self::assertSame($refreshToken, (string) ($this->cacheEntryForToken($customerToken)['token'] ?? ''));
+        $authority = $this->authorityRow((int) $appointment['id']);
 
         $peerBookingPage = $peerDirectClient->get('booking');
         self::assertSame(200, $peerBookingPage->statusCode, $peerBookingPage->body);
@@ -99,11 +109,15 @@ final class RescheduleMethodHttpTest extends TestCase
             self::assertSame($beforeRejected, $this->ownedCacheFiles(), $method . ' must not create customer tokens.');
             self::assertSame(405, $response->statusCode, $method . ' must be rejected.');
             self::assertSame('GET', strtoupper((string) $response->header('allow')), $method . ' must advertise GET.');
-            self::assertSame($authority, $this->authorityRow((int) $appointment['id']));
+            self::assertSame(
+                $authority,
+                $this->authorityRow((int) $appointment['id']),
+                $method . ' must not replace the existing authority row.',
+            );
             self::assertSame(
                 $fixture->customerId,
-                $this->customerTokenValue($customerToken),
-                'The customer token issued by the valid GET must remain authenticated.',
+                $this->customerTokenValue($refreshToken),
+                'The most recently issued customer token must remain authenticated.',
             );
             self::assertStringNotContainsString($customerToken, $response->body);
         }
@@ -157,7 +171,7 @@ final class RescheduleMethodHttpTest extends TestCase
             self::assertStringNotContainsString($internal['id_caldav_calendar'], $page->body);
 
             $customerToken = (string) ($vars['customer_token'] ?? '');
-            self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $customerToken);
+            self::assertMatchesRegularExpression('/^v3-[1-9][0-9]{0,18}-[A-Za-z0-9_-]{43}$/', $customerToken);
             self::assertSame($fixture->customerId, $this->customerTokenValue($customerToken));
 
             $authority = $this->authorityRow($appointmentId);
@@ -198,7 +212,29 @@ final class RescheduleMethodHttpTest extends TestCase
         }
         self::assertIsObject($cache);
 
-        return (int) $cache->get('customer-token-v2-' . $token);
+        self::assertSame(1, preg_match('/\Av3-([1-9][0-9]{0,18})-[A-Za-z0-9_-]{43}\z/D', $token, $matches));
+        $entry = $cache->get('customer-token-v3-' . $matches[1]);
+        self::assertIsArray($entry);
+        self::assertTrue(isset($entry['token'], $entry['customer_id']));
+        self::assertTrue(hash_equals((string) $entry['token'], $token));
+
+        return (int) $entry['customer_id'];
+    }
+
+    /** @return array<string, mixed> */
+    private function cacheEntryForToken(string $token): array
+    {
+        self::assertSame(1, preg_match('/\Av3-([1-9][0-9]{0,18})-[A-Za-z0-9_-]{43}\z/D', $token, $matches));
+        $cache = get_instance()->cache ?? null;
+        if (!is_object($cache) || !method_exists($cache, 'get')) {
+            get_instance()->load->driver('cache', ['adapter' => 'file']);
+            $cache = get_instance()->cache ?? null;
+        }
+        self::assertIsObject($cache);
+        $entry = $cache->get('customer-token-v3-' . $matches[1]);
+        self::assertIsArray($entry);
+
+        return $entry;
     }
 
     /** @return array<string, string> */
@@ -211,18 +247,23 @@ final class RescheduleMethodHttpTest extends TestCase
         }
 
         $files = [];
-        foreach (glob($cachePath . DIRECTORY_SEPARATOR . 'customer-token-v2-*') ?: [] as $path) {
+        foreach (glob($cachePath . DIRECTORY_SEPARATOR . 'customer-token-v3-*') ?: [] as $path) {
             if (
                 !is_file($path) ||
                 is_link($path) ||
-                !preg_match('/^customer-token-v2-[a-f0-9]{64}$/', basename($path))
+                !preg_match('/^customer-token-v3-[1-9][0-9]{0,18}$/', basename($path))
             ) {
                 continue;
             }
 
             $raw = file_get_contents($path);
             $entry = $raw === false ? false : @unserialize($raw, ['allowed_classes' => false]);
-            if (!is_array($entry) || ($entry['data'] ?? null) !== $customerId || ($entry['ttl'] ?? null) !== 600) {
+            if (
+                !is_array($entry) ||
+                !is_array($entry['data'] ?? null) ||
+                (int) ($entry['data']['customer_id'] ?? 0) !== $customerId ||
+                ($entry['ttl'] ?? null) !== 600
+            ) {
                 continue;
             }
 

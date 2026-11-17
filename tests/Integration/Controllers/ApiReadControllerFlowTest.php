@@ -74,6 +74,64 @@ class ApiReadControllerFlowTest extends TestCase
         }
     }
 
+    public function testBearerAuthorizationUsesConstantTimeComparisonAndFallsBackSafely(): void
+    {
+        $server = $_SERVER;
+        $this->fixtures->snapshotSettings(['api_token']);
+        try {
+            $this->fixtures->setSetting('api_token', 'synthetic-bearer-token');
+
+            $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer synthetic-bearer-token';
+            unset($_SERVER['PHP_AUTH_USER'], $_SERVER['PHP_AUTH_PW']);
+            $bearer = new class extends Api {
+                public function request_authentication(): void
+                {
+                    throw new RuntimeException('unexpected bearer authentication failure');
+                }
+            };
+            $bearer->auth();
+
+            $_SERVER['HTTP_AUTHORIZATION'] = 'Bearer wrong-token';
+            $rejected = new class extends Api {
+                public function request_authentication(): void
+                {
+                    throw new RuntimeException('bearer authentication rejected');
+                }
+            };
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('bearer authentication rejected');
+            $rejected->auth();
+        } finally {
+            $_SERVER = $server;
+        }
+    }
+
+    public function testEmptyBearerSettingAndMissingBearerUseBasicAuthentication(): void
+    {
+        $server = $_SERVER;
+        $this->fixtures->snapshotSettings(['api_token']);
+        try {
+            $this->fixtures->setSetting('api_token', '');
+            $_SERVER['PHP_AUTH_USER'] = 'administrator';
+            $_SERVER['PHP_AUTH_PW'] = 'administrator';
+            unset($_SERVER['HTTP_AUTHORIZATION'], $_SERVER['Authorization']);
+
+            $api = new class extends Api {
+                public function request_authentication(): void
+                {
+                    throw new RuntimeException('basic authentication unexpectedly failed');
+                }
+            };
+
+            $api->auth();
+            $property = new \ReflectionProperty(Api::class, 'basicActorId');
+            $property->setAccessible(true);
+            self::assertGreaterThan(0, $property->getValue($api));
+        } finally {
+            $_SERVER = $server;
+        }
+    }
+
     public function testAppointmentsShowReturnsRequestedAppointment(): void
     {
         $pair = $this->fixtures->resolveProviderServicePair();

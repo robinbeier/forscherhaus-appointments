@@ -90,7 +90,7 @@ final class PrivacyDeleteHttpTest extends TestCase
         $before = $this->ownedState($appointment, $buffer);
         $client = $server->client();
         $token = $this->customerToken($client, (string) $appointment['hash']);
-        $cacheKeys = ['customer-token-v2-' . $token];
+        $cacheKeys = [$this->customerTokenCacheKey($token)];
 
         try {
             $directClient = new \ReleaseGate\GateHttpClient($server->baseUrl, '');
@@ -132,10 +132,11 @@ final class PrivacyDeleteHttpTest extends TestCase
             self::assertSame(403, $invalidCsrf->statusCode);
             self::assertSame($before, $this->ownedState($appointment, $buffer));
 
-            $invalidToken = str_repeat('invalid-token-', 8);
-            $invalid = $client->post(self::ENDPOINT, ['customer_token' => $invalidToken]);
-            self::assertSame(500, $invalid->statusCode);
-            self::assertSame($before, $this->ownedState($appointment, $buffer));
+            foreach (['invalid-token-' . $fixture->run, '../customer-token-v2-secret', 'v3-99999999999999999999-' . str_repeat('A', 43)] as $invalidToken) {
+                $invalid = $client->post(self::ENDPOINT, ['customer_token' => $invalidToken]);
+                self::assertSame(500, $invalid->statusCode);
+                self::assertSame($before, $this->ownedState($appointment, $buffer));
+            }
 
             $expiredToken = 'expired-' . $fixture->run;
             $this->cacheToken($expiredToken, $fixture->customerId, 1);
@@ -151,6 +152,23 @@ final class PrivacyDeleteHttpTest extends TestCase
             $foreign = $client->post(self::ENDPOINT, ['customer_token' => $foreignToken]);
             self::assertSame(500, $foreign->statusCode);
             self::assertSame($before, $this->ownedState($appointment, $buffer));
+
+            $compatibilityPayload = $fixture->customerWritePayload('v2_compatibility');
+            $customerRole = get_instance()->db->get_where('roles', ['slug' => 'customer'])->row_array();
+            self::assertNotEmpty($customerRole);
+            self::assertTrue(get_instance()->db->insert('users', array_merge($compatibilityPayload, [
+                'timezone' => 'UTC',
+                'language' => 'english',
+                'id_roles' => (int) $customerRole['id'],
+                'is_private' => 0,
+            ])));
+            $compatibilityCustomer = (int) get_instance()->db->insert_id();
+            $compatibilityToken = bin2hex(random_bytes(32));
+            $this->cacheToken($compatibilityToken, $compatibilityCustomer, 600);
+            $cacheKeys[] = 'customer-token-v2-' . $compatibilityToken;
+            $compatibility = $client->post(self::ENDPOINT, ['customer_token' => $compatibilityToken]);
+            self::assertSame(200, $compatibility->statusCode);
+            self::assertSame([], $fixture->row('users', $compatibilityCustomer));
         } finally {
             $this->deleteCacheKeys($cacheKeys);
         }
@@ -167,7 +185,7 @@ final class PrivacyDeleteHttpTest extends TestCase
         $buffer = $this->addBuffer($appointment);
         $client = $server->client();
         $token = $this->customerToken($client, (string) $appointment['hash']);
-        $cacheKey = 'customer-token-v2-' . $token;
+        $cacheKey = $this->customerTokenCacheKey($token);
         $legacyToken = 'legacy-' . $fixture->run;
         $cache = get_instance()->cache ?? null;
         if (!is_object($cache) || !method_exists($cache, 'save')) {
@@ -179,6 +197,12 @@ final class PrivacyDeleteHttpTest extends TestCase
         self::assertSame(500, $legacyResponse->statusCode);
         self::assertNotSame([], $fixture->row('users', $fixture->customerId));
         $legacyCacheKey = 'customer-token-' . $legacyToken;
+        $oldV3Token = $token;
+        $token = $this->customerToken($client, (string) $appointment['hash']);
+        self::assertNotSame($oldV3Token, $token);
+        $staleResponse = $client->post(self::ENDPOINT, ['customer_token' => $oldV3Token]);
+        self::assertSame(500, $staleResponse->statusCode);
+        self::assertNotSame([], $fixture->row('users', $fixture->customerId));
         $providerBefore = $fixture->row('users', $fixture->providerId);
         $adminBefore = $fixture->row('users', $fixture->actorId);
         $serviceBefore = $fixture->row('services', $fixture->serviceId);
@@ -218,7 +242,7 @@ final class PrivacyDeleteHttpTest extends TestCase
         $before = $this->ownedState($appointment, $buffer);
         $client = $server->client();
         $token = $this->customerToken($client, (string) $appointment['hash']);
-        $cacheKey = 'customer-token-v2-' . $token;
+        $cacheKey = $this->customerTokenCacheKey($token);
         $trigger = $fixture->run . '_deny_privacy_delete';
         $rollbackMarker = self::ROLLBACK_MARKER . ':' . $fixture->run;
         $fixtureAdmin = null;
@@ -319,8 +343,15 @@ final class PrivacyDeleteHttpTest extends TestCase
         self::assertArrayHasKey(1, $matches);
         $vars = json_decode($matches[1], true, 512, JSON_THROW_ON_ERROR);
         self::assertIsString($vars['customer_token'] ?? null);
-        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $vars['customer_token']);
+        self::assertMatchesRegularExpression('/^v3-[1-9][0-9]{0,18}-[A-Za-z0-9_-]{43}$/', $vars['customer_token']);
         return $vars['customer_token'];
+    }
+
+    private function customerTokenCacheKey(string $token): string
+    {
+        self::assertSame(1, preg_match('/\Av3-([1-9][0-9]{0,18})-[A-Za-z0-9_-]{43}\z/D', $token, $matches));
+
+        return 'customer-token-v3-' . $matches[1];
     }
 
     private function ownedState(array $appointment, array $buffer): array

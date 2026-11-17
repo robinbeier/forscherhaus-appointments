@@ -180,6 +180,39 @@ final class RescheduleAuthorityLockOrderTest extends TestCase
         }
     }
 
+    public function testProjectionRollbackWriterRunsWhenAuthorityCommitFails(): void
+    {
+        $database = new RescheduleAuthorityCurrentReadFakeDatabase();
+        $database->failCommit = true;
+        $authority = $this->createAuthority($database);
+        $rollbackCalled = false;
+        session([
+            'public_reschedule_authority_context' => str_repeat('c', 43),
+        ]);
+
+        try {
+            $authority->issueWithPrivacyTokenAndProjection(
+                99,
+                'current-hash',
+                static fn(int $customerId): string => 'privacy-token',
+                static function () use (&$rollbackCalled): void {
+                    $rollbackCalled = true;
+                },
+            );
+            $this->fail('Expected the authority commit failure.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Could not persist reschedule authority.', $exception->getMessage());
+        } finally {
+            session([
+                'public_reschedule_authority_context' => null,
+                'public_reschedule_authority' => null,
+            ]);
+        }
+
+        $this->assertTrue($rollbackCalled);
+        $this->assertSame(['begin', 'insert', 'commit', 'rollback'], $database->events);
+    }
+
     public function testVerifyLockedStateLocksAllParentsBeforeAppointment(): void
     {
         $database = new RescheduleAuthorityLockOrderFakeDatabase();
@@ -509,6 +542,8 @@ final class RescheduleAuthorityCurrentReadFakeDatabase
 
     public bool $transactionActive = false;
 
+    public bool $failCommit = false;
+
     /** @var array<string, mixed> */
     public array $appointmentSnapshot = [
         'id' => 99,
@@ -609,7 +644,7 @@ final class RescheduleAuthorityCurrentReadFakeDatabase
         $this->transactionActive = false;
         $this->events[] = 'commit';
 
-        return true;
+        return !$this->failCommit;
     }
 
     public function trans_rollback(): bool

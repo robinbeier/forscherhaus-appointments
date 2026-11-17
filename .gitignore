@@ -22,6 +22,7 @@
 !/storage/backups/.htaccess
 !/storage/backups/index.html
 /storage/rate_limit.lock*
+/.fh-login-kdf/
 /storage/cache/*
 !/storage/cache/.htaccess
 !/storage/cache/index.html

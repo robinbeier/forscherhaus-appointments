@@ -1494,6 +1494,9 @@ final class DeployStableResultTest extends TestCase
             APP="$fixture/app"
             STAGE_ROOT="$fixture/stage"
             WEBUSER=www-data
+            DEPLOY_TEST_MODE=1
+            LOGIN_KDF_LOCK_ROOT="$fixture/stable-login-kdf"
+            export LOGIN_KDF_LOCK_ROOT
             rsync() {
               [[ "$1" == '-a' && "$2" == '--' ]]
               # Match rsync -a mode copying without claiming hardlink preservation.
@@ -1534,6 +1537,21 @@ final class DeployStableResultTest extends TestCase
             chmod 600 "$fixture/outside/hard-target"
             ln "$fixture/outside/hard-target" "$STAGE_ROOT/storage/sessions/ea_session_outside_hard"
             normalize_stage_permissions
+            [[ "$(stat -c '%u:%g:%a:%F' "$LOGIN_KDF_LOCK_ROOT")" == "0:0:755:directory" ]]
+            for slot in 0 1 2 3; do
+              slot_path="$LOGIN_KDF_LOCK_ROOT/slot-$slot.lock"
+              [[ "$(stat -c '%u:%g:%a:%h' "$slot_path")" == "$(id -u www-data):$(id -g www-data):600:1" ]]
+            done
+            stable_inodes="$(stat -c '%d:%i' "$LOGIN_KDF_LOCK_ROOT"/slot-*.lock | sort)"
+            runuser -u www-data -- env LOGIN_KDF_LOCK_ROOT="$LOGIN_KDF_LOCK_ROOT" php -r '
+              for ($i = 0; $i < 4; $i++) {
+                  $handle = fopen(getenv("LOGIN_KDF_LOCK_ROOT") . "/slot-$i.lock", "rb");
+                  if ($handle === false || !flock($handle, LOCK_EX | LOCK_NB)) { exit(1); }
+              }
+            '
+            runuser -u www-data -- sh -c "! rm '$LOGIN_KDF_LOCK_ROOT/slot-0.lock' 2>/dev/null"
+            normalize_stage_permissions
+            [[ "$stable_inodes" == "$(stat -c '%d:%i' "$LOGIN_KDF_LOCK_ROOT"/slot-*.lock | sort)" ]]
             [[ "$(stat -c '%u:%g:%a' "$STAGE_ROOT/application/index.php")" == "0:0:644" ]]
             [[ "$(stat -c '%a' "$STAGE_ROOT/config.php")" == 440 ]]
             [[ "$(stat -c '%a' "$STAGE_ROOT/storage/logs/runtime.log")" == 644 ]]

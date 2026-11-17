@@ -21,6 +21,7 @@
 class Privacy extends EA_Controller
 {
     private const CUSTOMER_TOKEN_CACHE_PREFIX = 'customer-token-v2-';
+    private const CUSTOMER_TOKEN_V3_CACHE_PREFIX = 'customer-token-v3-';
     /**
      * Privacy constructor.
      */
@@ -29,6 +30,7 @@ class Privacy extends EA_Controller
         parent::__construct();
 
         $this->load->model('customers_model');
+        $this->load->model('appointments_model');
     }
 
     /**
@@ -62,7 +64,41 @@ class Privacy extends EA_Controller
                 );
             }
 
-            $customer_id = $cache->get(self::CUSTOMER_TOKEN_CACHE_PREFIX . $customer_token);
+            $customer_id = null;
+
+            // v3 keeps one bounded cache entry per appointment while retaining
+            // a fresh random token for every page view. The exact token is
+            // compared server-side before the associated customer is used.
+            if (preg_match('/\Av3-([1-9][0-9]{0,18})-([A-Za-z0-9_-]{43})\z/D', $customer_token, $matches) === 1) {
+                $appointment_id = (int) $matches[1];
+                if ($appointment_id <= 0 || (string) $appointment_id !== $matches[1]) {
+                    throw new InvalidArgumentException('Invalid customer token value provided.');
+                }
+
+                $entry = $cache->get(self::CUSTOMER_TOKEN_V3_CACHE_PREFIX . $matches[1]);
+                if (
+                    is_array($entry) &&
+                    isset($entry['token'], $entry['customer_id'], $entry['appointment_id']) &&
+                    is_string($entry['token']) &&
+                    hash_equals($entry['token'], $customer_token) &&
+                    (int) $entry['appointment_id'] === $appointment_id &&
+                    (string) (int) $entry['appointment_id'] === $matches[1]
+                ) {
+                    $appointment = $this->appointments_model->find($appointment_id);
+                    if (
+                        is_array($appointment) &&
+                        (int) ($appointment['id_users_customer'] ?? 0) === (int) $entry['customer_id']
+                    ) {
+                        $customer_id = (int) $entry['customer_id'];
+                    }
+                }
+            } elseif (preg_match('/\A[a-f0-9]{64}\z/D', $customer_token) === 1) {
+                // Compatibility for already-open v2 pages. Those legacy
+                // random-key files remain bounded by their 600-second TTL;
+                // old expired files may persist until the existing cache
+                // driver's natural cleanup/read path.
+                $customer_id = $cache->get(self::CUSTOMER_TOKEN_CACHE_PREFIX . $customer_token);
+            }
 
             if (empty($customer_id)) {
                 throw new InvalidArgumentException(

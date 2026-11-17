@@ -1,5 +1,9 @@
 <?php defined('BASEPATH') or exit('No direct script access allowed');
 
+if (!class_exists('AuthenticationCapacityException')) {
+    class AuthenticationCapacityException extends RuntimeException {}
+}
+
 /* ----------------------------------------------------------------------------
  * Easy!Appointments - Online Appointment Scheduler
  *
@@ -68,7 +72,13 @@ class Accounts
         if (count($matches) !== 1) {
             // Keep the same legacy and Argon2id work as an invalid password
             // for an existing account, including when duplicate rows exist.
-            $this->verify_login_password('', '', $password);
+            $permit = $this->acquireKdfPermit();
+            try {
+                $this->verify_login_password('', '', $password, $permit);
+            } finally {
+                @flock($permit, LOCK_UN);
+                @fclose($permit);
+            }
             return null;
         }
 
@@ -77,36 +87,42 @@ class Accounts
         $stored_password = (string) ($user_settings['password'] ?? '');
         $salt = (string) ($user_settings['salt'] ?? '');
 
-        $local_password_valid = $this->verify_login_password($stored_password, $salt, $password);
-        if (!$local_password_valid || empty($user_settings)) {
-            return null;
-        }
-
-        if (
-            MODERN_PASSWORD_WRITES &&
-            (string) ($user_settings['ldap_dn'] ?? '') === '' &&
-            password_hash_needs_rehash($stored_password)
-        ) {
-            $new_password = hash_password_argon2id($password);
-            $new_salt = generate_salt();
-
-            $updated = $this->CI->db
-                ->where([
-                    'id_users' => $user_settings['id_users'],
-                    'username' => $username,
-                    'password' => $stored_password,
-                    'salt' => $salt,
-                ])
-                ->update('user_settings', ['password' => $new_password, 'salt' => $new_salt]);
-
-            if (!$updated || $this->CI->db->affected_rows() !== 1) {
-                // A concurrent writer won the CAS. Do not authenticate against
-                // a row that changed during this request.
+        $permit = $this->acquireKdfPermit();
+        try {
+            $local_password_valid = $this->verify_login_password($stored_password, $salt, $password, $permit);
+            if (!$local_password_valid || empty($user_settings)) {
                 return null;
-            } else {
-                $user_settings['password'] = $new_password;
-                $user_settings['salt'] = $new_salt;
             }
+
+            if (
+                MODERN_PASSWORD_WRITES &&
+                (string) ($user_settings['ldap_dn'] ?? '') === '' &&
+                password_hash_needs_rehash($stored_password)
+            ) {
+                $new_password = hash_password_argon2id($password);
+                $new_salt = generate_salt();
+
+                $updated = $this->CI->db
+                    ->where([
+                        'id_users' => $user_settings['id_users'],
+                        'username' => $username,
+                        'password' => $stored_password,
+                        'salt' => $salt,
+                    ])
+                    ->update('user_settings', ['password' => $new_password, 'salt' => $new_salt]);
+
+                if (!$updated || $this->CI->db->affected_rows() !== 1) {
+                    // A concurrent writer won the CAS. Do not authenticate against
+                    // a row that changed during this request.
+                    return null;
+                } else {
+                    $user_settings['password'] = $new_password;
+                    $user_settings['salt'] = $new_salt;
+                }
+            }
+        } finally {
+            @flock($permit, LOCK_UN);
+            @fclose($permit);
         }
 
         // Verification is deliberately expensive. A reset, deletion or username
@@ -159,7 +175,162 @@ class Accounts
      * Run one legacy and one current KDF on every credential shape. This keeps
      * known/wrong and unknown usernames on the same work path during migration.
      */
-    private function verify_login_password(string $hash, string $salt, string $password): bool
+    private function verify_login_password(string $hash, string $salt, string $password, mixed $permit = null): bool
+    {
+        $ownsPermit = $permit === null;
+        $permit ??= $this->acquireKdfPermit();
+
+        try {
+            return $this->verify_login_password_with_permit($hash, $salt, $password);
+        } finally {
+            if ($ownsPermit) {
+                @flock($permit, LOCK_UN);
+                @fclose($permit);
+            }
+        }
+    }
+
+    /**
+     * Bound concurrent password verification across web login and API Basic
+     * authentication without queueing PHP workers. Unknown and known users
+     * take the same KDF path after a permit is admitted.
+     *
+     * @return resource
+     */
+    private function acquireKdfPermit()
+    {
+        $cachePath = function_exists('config_item') ? (string) config_item('cache_path') : '';
+        $cachePath = rtrim($cachePath, DIRECTORY_SEPARATOR);
+        if ($cachePath === '' || !is_dir($cachePath) || is_link($cachePath)) {
+            throw new AuthenticationCapacityException('Authentication capacity unavailable.');
+        }
+
+        $parent = dirname($cachePath);
+        if (is_link($parent) || !is_dir($parent) || ($realParent = realpath($parent)) === false) {
+            throw new AuthenticationCapacityException('Authentication capacity unavailable.');
+        }
+        $testLockRoot = PHP_SAPI === 'cli' && defined('ENVIRONMENT') && ENVIRONMENT === 'testing'
+            ? getenv('EA_LOGIN_KDF_LOCK_ROOT')
+            : false;
+        $lockRoot = is_string($testLockRoot) && $testLockRoot !== ''
+            ? $testLockRoot
+            : '/var/www/html/.fh-login-kdf';
+        if (is_link($lockRoot) || !is_dir($lockRoot) || ($realLockRoot = realpath($lockRoot)) !== $lockRoot) {
+            throw new AuthenticationCapacityException('Authentication capacity unavailable.');
+        }
+        $lockRootStat = @stat($lockRoot);
+        $expectedRootUid = 0;
+        $expectedRootGid = 0;
+        if (PHP_SAPI === 'cli' && defined('ENVIRONMENT') && ENVIRONMENT === 'testing') {
+            $configuredUid = getenv('EA_LOGIN_KDF_LOCK_ROOT_UID');
+            $configuredGid = getenv('EA_LOGIN_KDF_LOCK_ROOT_GID');
+            if (is_string($configuredUid) && ctype_digit($configuredUid)) {
+                $expectedRootUid = (int) $configuredUid;
+            }
+            if (is_string($configuredGid) && ctype_digit($configuredGid)) {
+                $expectedRootGid = (int) $configuredGid;
+            }
+        }
+        if (
+            !is_array($lockRootStat) ||
+            (($lockRootStat['mode'] ?? 0) & 0170000) !== 0040000 ||
+            (($lockRootStat['mode'] ?? 0) & 0777) !== 0755 ||
+            ($lockRootStat['uid'] ?? null) !== $expectedRootUid ||
+            ($lockRootStat['gid'] ?? null) !== $expectedRootGid
+        ) {
+            throw new AuthenticationCapacityException('Authentication capacity unavailable.');
+        }
+
+        $permits = [];
+        try {
+            for ($slot = 0; $slot < 4; $slot++) {
+                $path = $lockRoot . DIRECTORY_SEPARATOR . 'slot-' . $slot . '.lock';
+                if (is_link($path) || (file_exists($path) && !is_file($path))) {
+                    throw new AuthenticationCapacityException('Authentication capacity unavailable.');
+                }
+
+                if (!is_file($path) || is_link($path)) {
+                    throw new AuthenticationCapacityException('Authentication capacity unavailable.');
+                }
+                $handle = @fopen($path, 'rb');
+                if ($handle === false || !is_resource($handle)) {
+                    throw new AuthenticationCapacityException('Authentication capacity unavailable.');
+                }
+                $permits[] = $handle;
+                if (@flock($handle, LOCK_EX | LOCK_NB)) {
+                    $descriptor = @fstat($handle);
+                    $pathStat = @lstat($path);
+                    $slotParentStat = $lockRootStat;
+                    if (
+                        !is_array($descriptor) || !is_array($pathStat) || !is_array($slotParentStat) ||
+                        ($descriptor['dev'] ?? null) !== ($pathStat['dev'] ?? null) ||
+                        ($descriptor['ino'] ?? null) !== ($pathStat['ino'] ?? null) ||
+                        ($descriptor['nlink'] ?? null) !== 1 ||
+                        ((int) ($descriptor['mode'] ?? 0) & 0170000) !== 0100000 ||
+                        ($descriptor['uid'] ?? null) !== ($this->webUserId() ?? -1) ||
+                        ($descriptor['gid'] ?? null) !== ($this->webGroupId() ?? -1) ||
+                        (($descriptor['mode'] ?? 0) & 0777) !== 0600
+                    ) {
+                        @flock($handle, LOCK_UN);
+                        throw new AuthenticationCapacityException('Authentication capacity unavailable.');
+                    }
+                    foreach ($permits as $candidate) {
+                        if ($candidate !== $handle) {
+                            @fclose($candidate);
+                        }
+                    }
+                    return $handle;
+                }
+                @fclose($handle);
+                array_pop($permits);
+            }
+        } catch (Throwable $e) {
+            foreach ($permits as $handle) {
+                @fclose($handle);
+            }
+            throw new AuthenticationCapacityException('Authentication capacity unavailable.', 0, $e);
+        }
+
+        throw new AuthenticationCapacityException('Authentication capacity unavailable.');
+    }
+
+    private function webUserId(): ?int
+    {
+        if (PHP_SAPI === 'cli' && defined('ENVIRONMENT') && ENVIRONMENT === 'testing') {
+            $configured = getenv('EA_LOGIN_KDF_SLOT_UID');
+            if (is_string($configured) && ctype_digit($configured)) {
+                return (int) $configured;
+            }
+        }
+
+        if (!function_exists('posix_getpwnam')) {
+            return null;
+        }
+
+        $account = @posix_getpwnam('www-data');
+
+        return is_array($account) && isset($account['uid']) ? (int) $account['uid'] : null;
+    }
+
+    private function webGroupId(): ?int
+    {
+        if (PHP_SAPI === 'cli' && defined('ENVIRONMENT') && ENVIRONMENT === 'testing') {
+            $configured = getenv('EA_LOGIN_KDF_SLOT_GID');
+            if (is_string($configured) && ctype_digit($configured)) {
+                return (int) $configured;
+            }
+        }
+
+        if (!function_exists('posix_getgrnam')) {
+            return null;
+        }
+
+        $group = @posix_getgrnam('www-data');
+
+        return is_array($group) && isset($group['gid']) ? (int) $group['gid'] : null;
+    }
+
+    private function verify_login_password_with_permit(string $hash, string $salt, string $password): bool
     {
         $within_limit = strlen($password) <= MAX_PASSWORD_LENGTH;
         $bounded_password = $within_limit ? $password : substr($password, 0, MAX_PASSWORD_LENGTH);

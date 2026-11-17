@@ -26,6 +26,18 @@ The writable exceptions are deliberately stable parent directories:
   the existing logrotate policy. Workers retain their existing unprivileged
   identity and cannot write the root-owned PHP log or log parent.
 
+The password-verification concurrency guard uses the stable directory
+`/var/www/html/.fh-login-kdf`, alongside the active application directory and
+outside the release tree that `deploy_ea.sh` replaces. It is provisioned before
+the release switch with owner `root`, mode `0755`, and four regular
+`www-data`-owned slot files with mode `0600`. The web worker can lock the
+slots but cannot replace them. The slots contain no credentials; they are only
+`flock(2)` coordination files. Keeping them outside the swapped tree preserves
+one lock namespace while old and new workers overlap during a release or
+rollback. Local Docker startup provisions the same path for the bind-mounted
+workspace. A missing, symlinked, hardlinked, or incorrectly owned path causes
+authentication to fail closed until a root-controlled repair is completed.
+
 The application needs the complete storage tree: session files, logs and CSP
 aggregate/temporary files, cache, root-level rate-limit lock files, uploads and
 application backup output. A subdirectory-only allowlist would miss the lock
@@ -59,6 +71,13 @@ change is included.
    Verify a graceful FPM reload and the normal log-reopen command before
    declaring the change complete. A trial directory rename is not a full live
    application deployment test.
+
+Before activation, verify the stable KDF directory and all four slot identities
+from the root deployment context, then verify that a `www-data` process can
+open and lock each slot. Repeat the identity check after stage normalization
+and after rollback preparation. Do not place these files under
+`easyappointments/storage`: that directory is copied between release trees and
+would create separate lock namespaces during the overlap.
 
 For rollback, restore only the captured previous drop-in state, daemon-reload,
 restart the same PHP service and rerun the functional checks. Preserve secrets,

@@ -1053,6 +1053,10 @@ apply_stage_permission_policy() {
   local storage_root="${STAGE_ROOT}/storage"
   local sessions_root="${storage_root}/sessions"
   local evidence_root="${STAGE_ROOT}/.release-gate"
+  local stable_lock_root='/var/www/html/.fh-login-kdf'
+  if [[ "${DEPLOY_TEST_MODE:-0}" == 1 && "${BASH_SOURCE[0]}" != "$0" && -n "${LOGIN_KDF_LOCK_ROOT:-}" ]]; then
+    stable_lock_root="$LOGIN_KDF_LOCK_ROOT"
+  fi
 
   # Zero-surprise evidence is root-only operational state.  It must survive
   # the code permission pass unchanged after stage ownership normalization.
@@ -1082,6 +1086,7 @@ apply_stage_permission_policy() {
   run_shell "if [[ -d '$storage_root' && ! -L '$storage_root' ]]; then find -P '$storage_root' -path '$sessions_root' -prune -o -type d -exec chmod 755 {} +; fi" || return $?
   run_shell "if [[ -d '$storage_root' && ! -L '$storage_root' ]]; then find -P '$storage_root' -path '$sessions_root' -prune -o -type f -links 1 -exec chown '$WEBUSER':'$WEBUSER' {} +; fi" || return $?
   run_shell "if [[ -d '$storage_root' && ! -L '$storage_root' ]]; then find -P '$storage_root' -path '$sessions_root' -prune -o -type f -links 1 -exec chmod 644 {} +; fi" || return $?
+  run_shell "stable_root='$stable_lock_root'; if [[ -L \"\$stable_root\" || ( -e \"\$stable_root\" && ! -d \"\$stable_root\" ) ]]; then echo '[!] Stable login KDF lock root is unsafe.' >&2; exit 1; fi; mkdir -p \"\$stable_root\"; chown 0:0 \"\$stable_root\"; chmod 755 \"\$stable_root\"; for slot in 0 1 2 3; do path=\"\$stable_root/slot-\$slot.lock\"; if [[ -L \"\$path\" || ( -e \"\$path\" && ! -f \"\$path\" ) || ( -e \"\$path\" && \"\$(stat -c '%h' \"\$path\")\" != 1 ) ]]; then echo '[!] Stable login KDF slot is unsafe.' >&2; exit 1; fi; touch \"\$path\"; chown '$WEBUSER':'$WEBUSER' \"\$path\"; chmod 600 \"\$path\"; done" || return $?
   return 0
 }
 

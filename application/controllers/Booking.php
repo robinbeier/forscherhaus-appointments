@@ -27,6 +27,7 @@ class Booking extends EA_Controller
     private const MAX_AVAILABLE_HOURS_ANY_PROVIDER_WORK = 64;
 
     private const CUSTOMER_TOKEN_CACHE_PREFIX = 'customer-token-v2-';
+    private const CUSTOMER_TOKEN_V3_CACHE_PREFIX = 'customer-token-v3-';
     public Reschedule_authority $reschedule_authority;
 
     public array $allowed_customer_fields = [
@@ -264,8 +265,64 @@ class Booking extends EA_Controller
                 return;
             }
 
-            $appointment = $results[0];
-            $customer = $this->customers_model->find($appointment['id_users_customer']);
+            $pendingCustomerToken = null;
+            $rollbackCustomerToken = null;
+            $projection = $this->rescheduleAuthority()->issueWithPrivacyTokenAndProjection(
+                (int) $results[0]['id'],
+                (string) $results[0]['hash'],
+                function (int $lockedCustomerId) use (&$pendingCustomerToken, &$rollbackCustomerToken, $results): string|bool {
+                    return $this->createCustomerToken(
+                        $lockedCustomerId,
+                        (int) $results[0]['id'],
+                        $pendingCustomerToken,
+                        $rollbackCustomerToken,
+                    );
+                },
+                static function () use (&$rollbackCustomerToken): void {
+                    if ($rollbackCustomerToken !== null) {
+                        $rollbackCustomerToken();
+                    }
+                },
+            );
+            $customer_token = $projection['customer_token'];
+
+            $appointment = $projection['appointment'];
+            $customer = $projection['customer'];
+            $provider = $projection['provider'];
+
+            if (
+                !is_string($customer_token) ||
+                !is_array($customer) ||
+                (int) ($customer['id'] ?? 0) !== (int) ($appointment['id_users_customer'] ?? 0) ||
+                (int) ($projection['customer_id'] ?? 0) !== (int) ($customer['id'] ?? 0) ||
+                !is_array($provider) ||
+                (int) ($provider['id'] ?? 0) !== (int) ($appointment['id_users_provider'] ?? 0)
+            ) {
+                if ($rollbackCustomerToken !== null) {
+                    $rollbackCustomerToken();
+                    $rollbackCustomerToken = null;
+                }
+                html_vars([
+                    'show_message' => true,
+                    'page_title' => lang('page_title') . ' ' . $company_name,
+                    'message_title' => lang('appointment_not_found'),
+                    'message_text' => lang('appointment_does_not_exist_in_db'),
+                    'message_icon' => base_url('assets/img/error.png'),
+                    'google_analytics_code' => $google_analytics_code,
+                    'matomo_analytics_url' => $matomo_analytics_url,
+                    'matomo_analytics_site_id' => $matomo_analytics_site_id,
+                ]);
+
+                $this->load->view('pages/booking_message');
+
+                return;
+            }
+
+            // The locked SQL rows bypass the model find() methods, which cast
+            // IDs and flags before exposing them to the booking page.
+            $this->appointments_model->cast($appointment);
+            $this->customers_model->cast($customer);
+            $this->providers_model->cast($provider);
 
             // Keep the public read projection separate from the write allowlist:
             // the cancellation form needs the hash, but callers must not save one.
@@ -281,12 +338,6 @@ class Booking extends EA_Controller
             // Only expose the fields required by the public booking page.
             $this->providers_model->only($provider, $this->allowed_provider_fields);
             $this->customers_model->only($customer, $this->allowed_customer_fields);
-
-            $customer_token = $this->rescheduleAuthority()->issueWithPrivacyToken(
-                (int) $appointment['id'],
-                (string) $appointment['hash'],
-                fn(int $lockedCustomerId): string|bool => $this->createCustomerToken($lockedCustomerId),
-            );
         } else {
             $manage_mode = false;
             $customer_token = false;
@@ -816,32 +867,99 @@ class Booking extends EA_Controller
         return true;
     }
 
-    private function createCustomerToken(int $customer_id): string|bool
+    /**
+     * @param array<string, mixed>|null $pending
+     * @param (callable(): void)|null $rollback
+     */
+    private function createCustomerToken(
+        int $customer_id,
+        int $appointment_id,
+        ?array &$pending = null,
+        ?callable &$rollback = null,
+    ): string|bool
     {
-        $customer_token = bin2hex(random_bytes(32));
-        $cache = $this->customerTokenCache();
+        if ($customer_id <= 0 || $appointment_id <= 0) {
+            return false;
+        }
 
-        if (!is_object($cache) || !method_exists($cache, 'save')) {
+        $random = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
+        $customer_token = 'v3-' . $appointment_id . '-' . $random;
+        $pending = [
+            'token' => $customer_token,
+            'customer_id' => $customer_id,
+            'appointment_id' => $appointment_id,
+        ];
+
+        $cache = $this->customerTokenCache();
+        $cache_key = self::CUSTOMER_TOKEN_V3_CACHE_PREFIX . $appointment_id;
+        if (!is_object($cache) || !method_exists($cache, 'save') || !method_exists($cache, 'get')) {
             log_message('error', 'Booking: customer token cache unavailable during reschedule flow.');
 
             return false;
         }
 
-        if (!$cache->save(self::CUSTOMER_TOKEN_CACHE_PREFIX . $customer_token, $customer_id, 600)) {
+        $previous = $cache->get($cache_key);
+        $previous_expire = null;
+        $metadata_known = false;
+        if (method_exists($cache, 'get_metadata')) {
+            $metadata = $cache->get_metadata($cache_key);
+            if (is_array($metadata) && isset($metadata['expire'])) {
+                $previous_expire = (int) $metadata['expire'];
+                $metadata_known = true;
+            }
+        }
+
+        // Without the old entry's remaining lifetime, compensation could
+        // accidentally extend a token after a failed commit. Fail closed and
+        // leave the existing token untouched in that case.
+        if (is_array($previous) && !$metadata_known) {
+            log_message('error', 'Booking: customer token cache metadata unavailable during reschedule flow.');
+
+            return false;
+        }
+
+        // This write is deliberately inside the appointment lock held by the
+        // authority transaction. Deferring it until after commit would allow
+        // concurrent page loads to persist an older token after a newer one.
+        if (!$cache->save($cache_key, $pending, 600)) {
             log_message('error', 'Booking: failed to persist customer token during reschedule flow.');
 
             return false;
         }
 
+        $rollback = function () use ($cache, $cache_key, $customer_token, $previous, $previous_expire): void {
+            $current = $cache->get($cache_key);
+            if (!is_array($current) || !hash_equals($customer_token, (string) ($current['token'] ?? ''))) {
+                return;
+            }
+
+            $remaining_ttl = is_int($previous_expire) ? $previous_expire - $this->customerTokenNow() : 0;
+            if ($remaining_ttl > 0 && is_array($previous)) {
+                $cache->save($cache_key, $previous, $remaining_ttl);
+            } elseif (method_exists($cache, 'delete')) {
+                $cache->delete($cache_key);
+            }
+        };
+
         return $customer_token;
+    }
+
+    protected function customerTokenNow(): int
+    {
+        return time();
     }
 
     private function customerTokenCache(): ?object
     {
         $CI = &get_instance();
-        $cache = $this->cache ?? ($CI->cache ?? null);
+        // CI_Controller exposes loaded drivers through __get(), but has no
+        // __isset(). Null coalescing would therefore hide a valid cache.
+        $cache = $this->cache;
+        if (!is_object($cache) || !method_exists($cache, 'save') || !method_exists($cache, 'get')) {
+            $cache = $CI->cache;
+        }
 
-        if (is_object($cache) && method_exists($cache, 'save')) {
+        if (is_object($cache) && method_exists($cache, 'save') && method_exists($cache, 'get')) {
             $this->cache = $cache;
 
             return $cache;
@@ -855,15 +973,18 @@ class Booking extends EA_Controller
             return null;
         }
 
-        $cache = $this->cache ?? ($CI->cache ?? null);
+        $cache = $this->cache;
+        if (!is_object($cache) || !method_exists($cache, 'save') || !method_exists($cache, 'get')) {
+            $cache = $CI->cache;
+        }
 
-        if (is_object($cache) && method_exists($cache, 'save')) {
+        if (is_object($cache) && method_exists($cache, 'save') && method_exists($cache, 'get')) {
             $this->cache = $cache;
 
             return $cache;
         }
 
-        log_message('error', 'Booking: cache driver did not expose save() after bootstrap.');
+        log_message('error', 'Booking: cache driver did not expose save()/get() after bootstrap.');
 
         return null;
     }

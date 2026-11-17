@@ -111,6 +111,7 @@ class DashboardMetricsControllerTest extends TestCase
         $this->assertSame(11, $controller->persistUserId);
         $this->assertSame('2026-11-24', $controller->persistStartDate);
         $this->assertSame('2026-11-27', $controller->persistEndDate);
+        $this->assertSame(['begin', 'persist', 'commit'], $controller->events);
     }
 
     public function testMetricsDoesNotPersistRangeWhenPeriodIsInvalid(): void
@@ -139,6 +140,7 @@ class DashboardMetricsControllerTest extends TestCase
         $this->assertFalse($response['success']);
         $this->assertSame(lang('filter_period_required'), $response['message']);
         $this->assertFalse($controller->persistCalled);
+        $this->assertSame(['begin', 'rollback'], $controller->events);
     }
 
     public function testMetricsRejectsOversizedPeriodAsValidationErrorBeforeCollecting(): void
@@ -193,6 +195,7 @@ class DashboardMetricsControllerTest extends TestCase
         $this->assertFalse($response['success']);
         $this->assertSame('Forbidden', $response['message']);
         $this->assertFalse($controller->persistCalled);
+        $this->assertSame([], $controller->events);
     }
 
     public function testMetricsRejectsNonPostWithoutPersisting(): void
@@ -282,6 +285,7 @@ class DashboardMetricsControllerTest extends TestCase
     {
         return new class extends Dashboard {
             public bool $persistCalled = false;
+            public array $events = [];
             public int $persistUserId = 0;
             public string $persistStartDate = '';
             public string $persistEndDate = '';
@@ -293,11 +297,23 @@ class DashboardMetricsControllerTest extends TestCase
                 return session('role_slug') === $expected_role && (int) session('user_id') > 0;
             }
 
+            protected function beginDashboardRoleGuard(string $expected_role): bool
+            {
+                if (session('role_slug') !== $expected_role || (int) session('user_id') <= 0) {
+                    return false;
+                }
+                $this->events[] = 'begin';
+                return true;
+            }
+            protected function commitDashboardRoleGuard(bool $role_guard): void { $this->events[] = 'commit'; }
+            protected function rollbackDashboardRoleGuard(bool $role_guard): void { $this->events[] = 'rollback'; }
+
             protected function persistProviderDashboardRange(
                 int $provider_id,
                 DateTimeImmutable $start,
                 DateTimeImmutable $end,
             ): void {
+                $this->events[] = 'persist';
                 $this->persistCalled = true;
                 $this->persistUserId = $provider_id;
                 $this->persistStartDate = $start->format('Y-m-d');

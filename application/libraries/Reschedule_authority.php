@@ -27,6 +27,12 @@ final class RescheduleAuthorityState
         public readonly int $serviceId,
         public readonly string $snapshotDigest,
         public readonly string $appointmentHash,
+        /** @var array<string, mixed> */
+        public readonly array $appointment = [],
+        /** @var array<string, mixed> */
+        public readonly array $customer = [],
+        /** @var array<string, mixed> */
+        public readonly array $provider = [],
     ) {}
 }
 
@@ -148,19 +154,62 @@ class Reschedule_authority
         string $presented_hash,
         callable $token_writer,
     ): string|bool {
-        $result = $this->issueInternal($appointment_id, $presented_hash, $token_writer);
+        $result = $this->issueInternal(
+            $appointment_id,
+            $presented_hash,
+            static fn(RescheduleAuthorityState $state): string|bool => $token_writer($state->customerId),
+        );
 
         return is_string($result) || is_bool($result) ? $result : false;
     }
 
     /**
-     * @param (callable(int): (string|bool))|null $before_commit
+     * Issue authority and return the exact locked public source rows used for
+     * its snapshot. The projection is returned only after the transaction
+     * commits, so callers cannot render a state different from the token.
+     *
+     * @return array{customer_token: string|bool, customer_id: int, appointment: array<string,mixed>, customer: array<string,mixed>, provider: array<string,mixed>}
+     */
+    public function issueWithPrivacyTokenAndProjection(
+        int $appointment_id,
+        string $presented_hash,
+        callable $token_writer,
+        ?callable $rollback_writer = null,
+    ): array {
+        $locked_state = null;
+        $result = $this->issueInternal(
+            $appointment_id,
+            $presented_hash,
+            function (RescheduleAuthorityState $state) use (&$locked_state, $token_writer): string|bool {
+                $locked_state = $state;
+
+                return $token_writer($state->customerId);
+            },
+            $rollback_writer,
+        );
+
+        if (!$locked_state instanceof RescheduleAuthorityState) {
+            throw new RuntimeException('Could not retain locked reschedule projection.');
+        }
+
+        return [
+            'customer_token' => is_string($result) || is_bool($result) ? $result : false,
+            'customer_id' => $locked_state->customerId,
+            'appointment' => $locked_state->appointment,
+            'customer' => $locked_state->customer,
+            'provider' => $locked_state->provider,
+        ];
+    }
+
+    /**
+     * @param (callable(RescheduleAuthorityState): (string|bool))|null $before_commit
      * @return string|bool|null
      */
     private function issueInternal(
         int $appointment_id,
         string $presented_hash,
         ?callable $before_commit,
+        ?callable $rollback_writer = null,
     ): string|bool|null {
         if (!$this->db->trans_begin()) {
             throw new RuntimeException('Could not start reschedule authority transaction.');
@@ -196,7 +245,7 @@ class Reschedule_authority
             $customer_token_result = null;
             if ($before_commit !== null) {
                 // Keep capability issuance inside the appointment row lock.
-                $customer_token_result = $before_commit((int) $state->customerId);
+                $customer_token_result = $before_commit($state);
             }
 
             if (!$this->db->trans_commit()) {
@@ -207,6 +256,14 @@ class Reschedule_authority
 
             return $customer_token_result;
         } catch (Throwable $exception) {
+            if ($rollback_writer !== null) {
+                try {
+                    $rollback_writer();
+                } catch (Throwable) {
+                    // Preserve the original authority failure; the rollback
+                    // callback is best-effort and must not mask it.
+                }
+            }
             $this->db->trans_rollback();
             session([self::SESSION_TOKEN_KEY => null]);
 
@@ -707,6 +764,9 @@ class Reschedule_authority
             throw new RescheduleAuthorityException('Public reschedule authority rejected.');
         }
 
+        $service_ids = $this->providerServiceIds($provider_id, $lock);
+        $provider['services'] = $service_ids;
+
         $snapshot = [
             'contract_version' => self::SNAPSHOT_CONTRACT_VERSION,
             'appointment' => $this->only($appointment, self::APPOINTMENT_SNAPSHOT_FIELDS),
@@ -717,7 +777,7 @@ class Reschedule_authority
                 'working_plan_exceptions' => $this->decodeJsonValue(
                     $provider_settings['working_plan_exceptions'] ?? null,
                 ),
-                'service_ids' => $this->providerServiceIds($provider_id, $lock),
+                'service_ids' => $service_ids,
             ],
             'service' => $this->only($service, self::SERVICE_SNAPSHOT_FIELDS),
         ];
@@ -735,6 +795,9 @@ class Reschedule_authority
             $service_id,
             hash('sha256', $encoded_snapshot),
             (string) ($appointment['hash'] ?? ''),
+            $appointment,
+            $customer,
+            $provider,
         );
     }
 
