@@ -273,6 +273,53 @@ class TestRoutingGuardTest(unittest.TestCase):
                 module.has_route("pdf-renderer/other.test.js", workflow, set(), [], root)
             )
 
+    def test_renderer_integrity_route_requires_command_script_and_docker_copy(self):
+        path = "pdf-renderer/integrity.test.js"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "pdf-renderer/package.json"
+            dockerfile = root / "pdf-renderer/Dockerfile"
+            package.parent.mkdir(parents=True)
+            workflow = (
+                "  pdf-renderer-tests:\n"
+                "    steps:\n"
+                "      - run: docker compose exec -T pdf-renderer npm test\n"
+            )
+            package.write_text(
+                '{"scripts":{"test":"node --test server.test.js concurrency.test.js integrity.test.js"}}\n',
+                encoding="utf-8",
+            )
+            dockerfile.write_text(
+                "WORKDIR /app\n"
+                "COPY --chown=node:node server.js concurrency.js integrity.test.js ./\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(module.has_route(path, workflow, set(), [], root))
+
+            self.assertFalse(module.has_route(path, workflow.replace("npm test", "npm run lint"), set(), [], root))
+
+            package.write_text(
+                '{"scripts":{"test":"node --test server.test.js concurrency.test.js"}}\n',
+                encoding="utf-8",
+            )
+            self.assertFalse(module.has_route(path, workflow, set(), [], root))
+            package.write_text(
+                '{"scripts":{"test":"node --test server.test.js integrity.test.js.extra"}}\n',
+                encoding="utf-8",
+            )
+            self.assertFalse(module.has_route(path, workflow, set(), [], root))
+
+            package.write_text(
+                '{"scripts":{"test":"node --test server.test.js integrity.test.js"}}\n',
+                encoding="utf-8",
+            )
+            dockerfile.write_text(
+                "WORKDIR /app\n"
+                "COPY --chown=node:node server.js integrity.test.js.extra ./\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(module.has_route(path, workflow, set(), [], root))
+
     def test_shell_comment_filter_preserves_quoted_hashes(self):
         self.assertEqual(
             "node --test 'fixture#one.test.js' ",
