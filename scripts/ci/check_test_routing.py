@@ -55,6 +55,14 @@ REVIEWED_INDIRECT_JS_ROUTES = {
         "script": "test",
         "token": "concurrency.test.js",
     },
+    "pdf-renderer/integrity.test.js": {
+        "job": "pdf-renderer-tests",
+        "command": "docker compose exec -T pdf-renderer npm test",
+        "package": "pdf-renderer/package.json",
+        "script": "test",
+        "token": "integrity.test.js",
+        "dockerfile": "pdf-renderer/Dockerfile",
+    },
 }
 
 
@@ -196,11 +204,20 @@ def has_route(path: str, workflow: str, files: set[str], directories: list[str],
             return False
         script = manifest.get("scripts", {}).get(route["script"])
         job_commands = run_commands(job_body(workflow, route["job"]))
-        return (
+        routed = (
             isinstance(script, str)
             and contains_exact_command(job_commands, route["command"])
             and contains_node_test_file(script, route["token"])
         )
+        if not routed or "dockerfile" not in route:
+            return routed
+        dockerfile = (root / route["dockerfile"]).read_text(encoding="utf-8")
+        copy_lines = [line for line in dockerfile.splitlines() if re.match(r"\s*COPY\b", line)]
+        return any(
+            re.search(rf"(?<![A-Za-z0-9_.-]){re.escape(route['token'])}(?![A-Za-z0-9_.-])", line)
+            and re.search(r"\s(?:/app/|\./)\s*$", line)
+            for line in copy_lines
+        ) and re.search(r"(?m)^\s*WORKDIR\s+/app\s*$", dockerfile) is not None
     return contains_test_argument(commands, path) or (
         path.endswith(".py") and contains_test_argument(
             commands, path.removesuffix(".py").replace("/", "."), module=True
