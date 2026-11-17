@@ -98,6 +98,209 @@ class LdapResetDirectoryScriptTest extends TestCase
         }
     }
 
+    public function testResetDirectoryScriptRejectsOpenldapPathOverrideBeforeStoppingService(): void
+    {
+        $workspace = sys_get_temp_dir() . '/ldap-reset-unsafe-path-' . bin2hex(random_bytes(8));
+        $fakeBin = $workspace . '/bin';
+        $marker = $workspace . '/compose-actions.log';
+        $victim = $workspace . '/victim.txt';
+
+        mkdir($fakeBin, 0777, true);
+        file_put_contents($victim, 'must survive');
+
+        try {
+            $dockerScript = <<<'BASH'
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf '%s\n' "$*" >> "${LDAP_TEST_ACTION_LOG}"
+            if [[ "${1:-}" == "compose" ]]; then
+              shift
+              [[ "${1:-}" == "config" && "${2:-}" == "--services" ]] && { printf 'openldap\n'; exit 0; }
+            fi
+            exit 0
+            BASH;
+            file_put_contents($fakeBin . '/docker', $dockerScript);
+            chmod($fakeBin . '/docker', 0755);
+
+            $result = $this->runCommand(['bash', 'scripts/ldap/reset_directory.sh'], $this->repoRoot(), [
+                'PATH' => $fakeBin . ':' . getenv('PATH'),
+                'LDAP_DATABASE_DIR' => $workspace,
+                'LDAP_TEST_ACTION_LOG' => $marker,
+            ]);
+
+            self::assertSame(1, $result['exit_code']);
+            self::assertStringContainsString('Unsafe LDAP database', $result['stderr']);
+            self::assertSame('must survive', file_get_contents($victim));
+            self::assertStringNotContainsString('stop openldap', file_get_contents($marker));
+        } finally {
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testResetDirectoryScriptFailsClosedWhenMountInspectionFailsBeforeStoppingService(): void
+    {
+        $workspace = dirname($this->repoRoot()) . '/ldap-reset-mount-check-' . bin2hex(random_bytes(8));
+        $fakeBin = $workspace . '/bin';
+        $runtimeRoot = $this->repoRoot() . '/docker/ldap-runtime/' . bin2hex(random_bytes(8));
+        $marker = $workspace . '/compose-actions.log';
+        $mountTool = PHP_OS_FAMILY === 'Darwin' ? 'mount' : 'findmnt';
+
+        mkdir($fakeBin, 0777, true);
+        mkdir($runtimeRoot . '/database', 0777, true);
+        mkdir($runtimeRoot . '/config', 0777, true);
+
+        try {
+            $dockerScript = <<<'BASH'
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf '%s\n' "$*" >> "${LDAP_TEST_ACTION_LOG}"
+            if [[ "${1:-}" == "compose" ]]; then
+              shift
+              [[ "${1:-}" == "config" && "${2:-}" == "--services" ]] && { printf 'customldap\n'; exit 0; }
+            fi
+            exit 0
+            BASH;
+            $findmntScript = <<<'BASH'
+            #!/usr/bin/env bash
+            exit 127
+            BASH;
+            file_put_contents($fakeBin . '/docker', $dockerScript);
+            file_put_contents($fakeBin . '/' . $mountTool, $findmntScript);
+            chmod($fakeBin . '/docker', 0755);
+            chmod($fakeBin . '/' . $mountTool, 0755);
+
+            $result = $this->runCommand(['bash', 'scripts/ldap/reset_directory.sh'], $this->repoRoot(), [
+                'PATH' => $fakeBin . ':' . getenv('PATH'),
+                'LDAP_SERVICE_NAME' => 'customldap',
+                'LDAP_DATABASE_DIR' => $runtimeRoot . '/database',
+                'LDAP_CONFIG_DIR' => $runtimeRoot . '/config',
+                'LDAP_SKIP_SEED_APPLY' => '1',
+                'LDAP_TEST_ACTION_LOG' => $marker,
+            ]);
+
+            self::assertSame(1, $result['exit_code']);
+            self::assertStringContainsString('mount inspection failed', $result['stderr']);
+            self::assertStringNotContainsString('stop customldap', file_get_contents($marker));
+        } finally {
+            $this->removeDirectory($runtimeRoot);
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testResetDirectoryScriptRejectsMountedRuntimeTargetBeforeStoppingService(): void
+    {
+        $workspace = dirname($this->repoRoot()) . '/ldap-reset-mounted-target-' . bin2hex(random_bytes(8));
+        $fakeBin = $workspace . '/bin';
+        $runtimeRoot = $this->repoRoot() . '/docker/ldap-runtime/' . bin2hex(random_bytes(8));
+        $database = $runtimeRoot . '/database';
+        $marker = $workspace . '/compose-actions.log';
+        $mountTool = PHP_OS_FAMILY === 'Darwin' ? 'mount' : 'findmnt';
+
+        mkdir($fakeBin, 0777, true);
+        mkdir($database, 0777, true);
+        mkdir($runtimeRoot . '/config', 0777, true);
+        file_put_contents($database . '/must-survive', 'mounted data');
+
+        try {
+            $dockerScript = <<<'BASH'
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf '%s\n' "$*" >> "${LDAP_TEST_ACTION_LOG}"
+            if [[ "${1:-}" == "compose" ]]; then
+              shift
+              [[ "${1:-}" == "config" && "${2:-}" == "--services" ]] && { printf 'customldap\n'; exit 0; }
+            fi
+            exit 0
+            BASH;
+            $findmntScript = PHP_OS_FAMILY === 'Darwin' ? <<<BASH
+            #!/usr/bin/env bash
+            printf '%s\\n' 'fake-device on {$database} (fakefs)'
+            BASH : <<<BASH
+            #!/usr/bin/env bash
+            printf '%s\\n' '{$database}'
+            BASH;
+            file_put_contents($fakeBin . '/docker', $dockerScript);
+            file_put_contents($fakeBin . '/' . $mountTool, $findmntScript);
+            chmod($fakeBin . '/docker', 0755);
+            chmod($fakeBin . '/' . $mountTool, 0755);
+
+            $result = $this->runCommand(['bash', 'scripts/ldap/reset_directory.sh'], $this->repoRoot(), [
+                'PATH' => $fakeBin . ':' . getenv('PATH'),
+                'LDAP_SERVICE_NAME' => 'customldap',
+                'LDAP_DATABASE_DIR' => $database,
+                'LDAP_CONFIG_DIR' => $runtimeRoot . '/config',
+                'LDAP_SKIP_SEED_APPLY' => '1',
+                'LDAP_TEST_ACTION_LOG' => $marker,
+            ]);
+
+            self::assertSame(1, $result['exit_code']);
+            self::assertStringContainsString('mount target', $result['stderr']);
+            self::assertSame('mounted data', file_get_contents($database . '/must-survive'));
+            self::assertStringNotContainsString('stop customldap', file_get_contents($marker));
+        } finally {
+            $this->removeDirectory($runtimeRoot);
+            $this->removeDirectory($workspace);
+        }
+    }
+
+    public function testResetDirectoryScriptResetsSafeRuntimeFixtureAfterPreflight(): void
+    {
+        $workspace = dirname($this->repoRoot()) . '/ldap-reset-safe-target-' . bin2hex(random_bytes(8));
+        $fakeBin = $workspace . '/bin';
+        $runtimeRoot = $this->repoRoot() . '/docker/ldap-runtime/' . bin2hex(random_bytes(8));
+        $database = $runtimeRoot . '/database';
+        $config = $runtimeRoot . '/config';
+        $marker = $workspace . '/compose-actions.log';
+        $mountTool = PHP_OS_FAMILY === 'Darwin' ? 'mount' : 'findmnt';
+
+        mkdir($fakeBin, 0777, true);
+        mkdir($database . '/nested', 0777, true);
+        mkdir($config . '/nested', 0777, true);
+        file_put_contents($database . '/nested/data.ldif', 'fixture');
+        file_put_contents($config . '/nested/config.ldif', 'fixture');
+
+        try {
+            $dockerScript = <<<'BASH'
+            #!/usr/bin/env bash
+            set -euo pipefail
+            printf '%s\n' "$*" >> "${LDAP_TEST_ACTION_LOG}"
+            if [[ "${1:-}" == "compose" ]]; then
+              shift
+              [[ "${1:-}" == "config" && "${2:-}" == "--services" ]] && { printf 'customldap\n'; exit 0; }
+            fi
+            exit 0
+            BASH;
+            $mountScript = <<<'BASH'
+            #!/usr/bin/env bash
+            exit 0
+            BASH;
+            file_put_contents($fakeBin . '/docker', $dockerScript);
+            file_put_contents($fakeBin . '/' . $mountTool, $mountScript);
+            chmod($fakeBin . '/docker', 0755);
+            chmod($fakeBin . '/' . $mountTool, 0755);
+
+            $result = $this->runCommand(['bash', 'scripts/ldap/reset_directory.sh'], $this->repoRoot(), [
+                'PATH' => $fakeBin . ':' . getenv('PATH'),
+                'LDAP_SERVICE_NAME' => 'customldap',
+                'LDAP_DATABASE_DIR' => $database,
+                'LDAP_CONFIG_DIR' => $config,
+                'LDAP_SKIP_SEED_APPLY' => '1',
+                'LDAP_TEST_ACTION_LOG' => $marker,
+            ]);
+
+            self::assertSame(0, $result['exit_code']);
+            self::assertStringContainsString('stop customldap', file_get_contents($marker));
+            self::assertStringContainsString('up -d customldap', file_get_contents($marker));
+            self::assertDirectoryExists($database);
+            self::assertDirectoryExists($config);
+            self::assertFileDoesNotExist($database . '/nested/data.ldif');
+            self::assertFileDoesNotExist($config . '/nested/config.ldif');
+        } finally {
+            $this->removeDirectory($runtimeRoot);
+            $this->removeDirectory($workspace);
+        }
+    }
+
     /**
      * @param list<string> $command
      * @param array<string, string> $env
