@@ -111,11 +111,11 @@ configure_ldap_runtime_state() {
 validate_runtime_state_dir() {
     local path="$1" label="$2" expected_root="$3" parent canonical
 
-    [[ -n "$path" && "$path" == /* && "$path" != *$'\n'* ]] || {
+    [[ -n "$path" && "$path" == /* && "$path" != *[[:cntrl:]]* ]] || {
         echo "Unsafe LDAP ${label} directory: path must be an absolute nonempty path." >&2
         return 1
     }
-    [[ "$path" != *//* && "$path" != */./* && "$path" != */. && "$path" != */../* && "$path" != */.. ]] || {
+    [[ "$path" != */ && "$path" != *//* && "$path" != */./* && "$path" != */. && "$path" != */../* && "$path" != */.. ]] || {
         echo "Unsafe LDAP ${label} directory: ambiguous traversal path ${path}." >&2
         return 1
     }
@@ -151,12 +151,18 @@ validate_runtime_state_dir() {
         echo "Cannot validate LDAP ${label} mount boundaries: mount inspection failed." >&2
         return 1
     fi
-    local nested_mount
-    nested_mount="$(printf '%s\n' "$mount_targets" | awk -v root="$canonical" '$0 == root || index($0, root "/") == 1 { print; exit }')"
-    [[ -z "$nested_mount" ]] || {
-        echo "Unsafe LDAP ${label} directory: mount target ${nested_mount} is within ${canonical}." >&2
-        return 1
-    }
+    local mount_root="$canonical"
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        mount_root="${mount_root//\\/\\x5c}"
+        mount_root="${mount_root// /\\x20}"
+    fi
+    local mount_target
+    while IFS= read -r mount_target; do
+        if [[ "$mount_target" == "$mount_root" || "$mount_target" == "$mount_root/"* ]]; then
+            echo "Unsafe LDAP ${label} directory: mount target ${mount_target} is within ${canonical}." >&2
+            return 1
+        fi
+    done <<< "$mount_targets"
 
     # The default service is intentionally bound to the two compose bind mounts.
     # Ambient overrides are never an authority to widen a destructive reset.

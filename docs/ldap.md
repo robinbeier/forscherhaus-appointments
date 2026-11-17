@@ -15,7 +15,7 @@ bash ./scripts/ldap/smoke.sh
 ```
 
 The reset helper validates its deletion roots before stopping or removing the LDAP container. It refuses ambient
-path overrides, repository-root or broad paths, symlinked components, overlapping roots, and mount targets or child
+path overrides, repository-root or broad paths, ambiguous/trailing-slash paths, symlinked components, overlapping roots, and mount targets or child
 mounts. Linux hosts must provide `findmnt`; macOS uses the native `mount` and `stat -f` tools. If platform-appropriate
 mount inspection is unavailable or fails, the reset stops without changing the service or filesystem.
 
