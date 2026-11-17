@@ -62,6 +62,23 @@ final class AccountsPasswordSnapshotTest extends TestCase
         self::assertSame(1, $result['reads']);
     }
 
+    public function testKdfPermitUsesEffectiveRuntimeIdentityWhenTestingOverrideIsAbsent(): void
+    {
+        $result = $this->probe('legacy', 'active', 'stable', 'runtime-identity');
+
+        self::assertTrue($result['authenticated']);
+        self::assertSame(2, $result['reads']);
+    }
+
+    public function testKdfPermitRejectsSlotWithMismatchedRuntimeOwnership(): void
+    {
+        $result = $this->probe('legacy', 'active', 'stable', 'runtime-mismatch');
+
+        self::assertTrue($result['capacity_denied']);
+        self::assertFalse($result['authenticated']);
+        self::assertSame(1, $result['reads']);
+    }
+
     public function testLdapLinkedAccountNeverAuthenticatesWithRetainedLocalVerifier(): void
     {
         foreach (['legacy', 'modern'] as $format) {

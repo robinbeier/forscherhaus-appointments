@@ -23,6 +23,7 @@ class Config
 $ci = new EA_Controller();
 $kdfRoot = getenv('KDF_TEST_ROOT') ?: (sys_get_temp_dir() . '/accounts-kdf-' . getmypid());
 $kdfCache = $kdfRoot . '/cache';
+$probeMode = $argv[4] ?? '';
 mkdir($kdfCache, 0700, true);
 mkdir(dirname($kdfCache) . '/login-kdf-locks', 0755, true);
 $lockRoot = dirname($kdfCache) . '/login-kdf-locks';
@@ -33,18 +34,27 @@ chown($lockRoot, $lockOwner);
 chgrp($lockRoot, $lockGroup);
 $webUid = function_exists('posix_geteuid') ? (int) posix_geteuid() : 0;
 $webGid = function_exists('posix_getegid') ? (int) posix_getegid() : 0;
-putenv('EA_LOGIN_KDF_SLOT_UID=' . $webUid);
-putenv('EA_LOGIN_KDF_SLOT_GID=' . $webGid);
+$slotUid = $webUid;
+$slotGid = $webGid;
+if ($probeMode === 'runtime-mismatch') {
+    putenv('EA_LOGIN_KDF_SLOT_UID=' . ($webUid === 0 ? 1 : 0));
+    putenv('EA_LOGIN_KDF_SLOT_GID=' . ($webGid === 0 ? 1 : 0));
+} elseif ($probeMode !== 'runtime-identity') {
+    putenv('EA_LOGIN_KDF_SLOT_UID=' . $slotUid);
+    putenv('EA_LOGIN_KDF_SLOT_GID=' . $slotGid);
+}
 putenv('EA_LOGIN_KDF_LOCK_ROOT_UID=' . $lockOwner);
 putenv('EA_LOGIN_KDF_LOCK_ROOT_GID=' . $lockGroup);
 for ($slot = 0; $slot < 4; $slot++) {
     $slotPath = $lockRoot . '/slot-' . $slot . '.lock';
     touch($slotPath);
-    chown($slotPath, $webUid);
-    chgrp($slotPath, $webGid);
+    if (!chown($slotPath, $slotUid) || !chgrp($slotPath, $slotGid)) {
+        fwrite(STDERR, "could not set synthetic slot ownership\n");
+        exit(1);
+    }
     chmod($slotPath, 0600);
 }
-$hardlinkProbe = ($argv[4] ?? '') === 'hardlink';
+$hardlinkProbe = $probeMode === 'hardlink';
 if ($hardlinkProbe && !link($lockRoot . '/slot-0.lock', $lockRoot . '/slot-0.alias')) {
     fwrite(STDERR, "could not create hardlink probe\n");
     exit(1);
@@ -242,7 +252,7 @@ $capacityDenied = false;
 try {
     $result = (new Accounts())->check_login($mode === 'unknown' ? 'missing' : 'synthetic', 'old-password');
 } catch (RuntimeException $e) {
-    if ((!$holdKdfPermits && !$hardlinkProbe) || $e->getMessage() !== 'Authentication capacity unavailable.') {
+    if ((!$holdKdfPermits && !$hardlinkProbe && $probeMode !== 'runtime-mismatch') || $e->getMessage() !== 'Authentication capacity unavailable.') {
         throw $e;
     }
     $capacityDenied = true;

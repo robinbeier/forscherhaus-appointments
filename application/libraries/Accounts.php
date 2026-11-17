@@ -303,13 +303,13 @@ class Accounts
             }
         }
 
-        if (!function_exists('posix_getpwnam')) {
+        if (!function_exists('posix_geteuid')) {
             return null;
         }
 
-        $account = @posix_getpwnam('www-data');
+        $uid = @posix_geteuid();
 
-        return is_array($account) && isset($account['uid']) ? (int) $account['uid'] : null;
+        return is_int($uid) && $uid >= 0 ? $uid : null;
     }
 
     private function webGroupId(): ?int
@@ -321,13 +321,13 @@ class Accounts
             }
         }
 
-        if (!function_exists('posix_getgrnam')) {
+        if (!function_exists('posix_getegid')) {
             return null;
         }
 
-        $group = @posix_getgrnam('www-data');
+        $gid = @posix_getegid();
 
-        return is_array($group) && isset($group['gid']) ? (int) $group['gid'] : null;
+        return is_int($gid) && $gid >= 0 ? $gid : null;
     }
 
     private function verify_login_password_with_permit(string $hash, string $salt, string $password): bool
