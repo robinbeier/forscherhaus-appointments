@@ -21,7 +21,7 @@ import re
 from pathlib import Path
 
 TARGET = Path('/root/deploy_ea.sh')
-CANDIDATE = Path('/root/.fh-deploy-ea.sh.candidate')
+CANDIDATE = Path('/root/.fh-deploy-ea.sh.candidate-kdf-v3')
 LOCK = Path('/var/lib/fh-deploy-orchestrator/locks/fh-production-change.lock')
 TX_ROOT = Path('/var/lib/fh-deploy-orchestrator/helper-sync.v1')
 PENDING = TX_ROOT / 'pending.json'
@@ -39,10 +39,10 @@ FOREIGN_MARKERS = (
     Path('/var/lib/fh-defense-ordinary/sessions.json'),
     Path('/var/lib/fh-defense-ordinary/sessions.json.tmp'),
 )
-OLD_SHA256 = 'f1fe428f50a7b2a94eff4ef82243e8e6f58904eaeca8749826d91e1a9fa83aa8'
-OLD_SIZE = 104901
-NEW_SHA256 = 'e07246f1b10bcc522f1b80bccec91a67fc14a8082279ba2d5c31f8c22909fff9'
-NEW_SIZE = 107128
+OLD_SHA256 = 'e07246f1b10bcc522f1b80bccec91a67fc14a8082279ba2d5c31f8c22909fff9'
+OLD_SIZE = 107128
+NEW_SHA256 = '1dfb5d59e53fdff91c649ca5959ac9730c8f02229e6af823022dca78245676a2'
+NEW_SIZE = 107986
 
 TRANSACTION_SCHEMA = 'helper_sync.current.v2'
 

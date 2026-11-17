@@ -612,6 +612,11 @@ jobs:
           sed -i "s/const DB_HOST = 'mysql';/const DB_HOST = '127.0.0.1';/" config.php
           grep -Fq "const DB_HOST = '127.0.0.1';" config.php
           ROB557_GATE_COMMAND
+      - name: Provision synthetic login KDF slots
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label build-test-kdf -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          bash scripts/ci/provision_host_kdf_slots.sh
+          ROB557_GATE_COMMAND
       - name: Wait for build-test MySQL readiness
         run: |
           python3 -B scripts/ci/run_gate_with_summary.py --label build-test-5 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
@@ -1050,6 +1055,11 @@ jobs:
           coverage: none
           extensions: curl,gd,intl,ldap,mbstring,mysqli,pdo,pdo_mysql,sockets,xml,zip,exif,sqlite3,gettext,bcmath
           tools: composer:v2
+      - name: Provision synthetic login KDF slots
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-kdf -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          bash scripts/ci/provision_host_kdf_slots.sh
+          ROB557_GATE_COMMAND
       - name: Install Composer dependencies
         run: |
           python3 -B scripts/ci/run_gate_with_summary.py --label deep-runtime-suite-3 -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
@@ -1344,6 +1354,11 @@ jobs:
           install -m 0600 config-sample.php config.php
           sed -i "s/const DB_HOST = 'mysql';/const DB_HOST = '127.0.0.1';/" config.php
           grep -Fq "const DB_HOST = '127.0.0.1';" config.php
+          ROB557_GATE_COMMAND
+      - name: Provision synthetic login KDF slots
+        run: |
+          python3 -B scripts/ci/run_gate_with_summary.py --label coverage-shard-integration-kdf -- bash --noprofile --norc -e <<'ROB557_GATE_COMMAND'
+          bash scripts/ci/provision_host_kdf_slots.sh
           ROB557_GATE_COMMAND
       - name: Wait for MySQL readiness
         run: |

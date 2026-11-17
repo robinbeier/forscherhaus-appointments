@@ -44,6 +44,12 @@ avoids rediscovering root-only tests in the general CI run. Local `phpunit.xml`
 and coverage selection are unchanged; running the normal local command still
 discovers all tests and applies their existing platform prerequisites.
 
+The host-PHP `build-test`, `coverage-shard-integration`, and `deep-runtime-suite`
+jobs provision four synthetic login KDF lock slots before authentication tests.
+The CI-only helper uses the same root-owned directory and runner-owned slot
+permissions as the deployed runtime, then exports the runner UID/GID for CLI
+test processes. Docker-backed jobs use their own container startup provisioner.
+
 The `calendar-canary-regressions` job runs the calendar authorization,
 zero-surprise canary, Customers UI fixture lifecycle, Provider UI fixture
 lifecycle, and root-dependent CSP activation/status tests inside one fresh,
