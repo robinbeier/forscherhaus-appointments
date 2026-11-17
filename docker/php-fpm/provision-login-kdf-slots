@@ -1,0 +1,49 @@
+#!/bin/bash
+set -euo pipefail
+
+# Provision the fixed filesystem permits used by Accounts::acquireKdfPermit.
+# This remains independently callable for root-run isolated CI fixtures that
+# replace the image command instead of running the normal entrypoint.
+KDF_ROOT='/var/www/html/.fh-login-kdf'
+
+if [[ "$(id -u)" != 0 ]]; then
+    echo "✖ Login KDF slots require root" >&2
+    exit 1
+fi
+if ! id -u www-data >/dev/null 2>&1 || ! id -g www-data >/dev/null 2>&1; then
+    echo "✖ www-data account is unavailable" >&2
+    exit 1
+fi
+if [[ -L /var/www/html || ! -d /var/www/html ]]; then
+    echo "✖ Refusing invalid application root" >&2
+    exit 1
+fi
+if [[ -L "$KDF_ROOT" || ( -e "$KDF_ROOT" && ! -d "$KDF_ROOT" ) ]]; then
+    echo "✖ Refusing invalid login KDF lock directory" >&2
+    exit 1
+fi
+mkdir -p -- "$KDF_ROOT"
+chown root:root -- "$KDF_ROOT"
+chmod 0755 -- "$KDF_ROOT"
+
+web_uid="$(id -u www-data)"
+web_gid="$(id -g www-data)"
+for slot_number in 0 1 2 3; do
+    slot_file="$KDF_ROOT/slot-${slot_number}.lock"
+    if [[ -L "$slot_file" || -d "$slot_file" || ( -e "$slot_file" && ! -f "$slot_file" ) ]]; then
+        echo "✖ Refusing invalid login KDF slot: $slot_file" >&2
+        exit 1
+    fi
+    if [[ -e "$slot_file" && "$(stat -c '%h' -- "$slot_file")" != 1 ]]; then
+        echo "✖ Refusing hardlinked login KDF slot: $slot_file" >&2
+        exit 1
+    fi
+    touch -- "$slot_file"
+    chown "$web_uid:$web_gid" -- "$slot_file"
+    chmod 0600 -- "$slot_file"
+    slot_stat="$(stat -c '%u:%g:%a:%h:%F' -- "$slot_file")"
+    [[ "$slot_stat" == "${web_uid}:${web_gid}:600:1:regular empty file" || "$slot_stat" == "${web_uid}:${web_gid}:600:1:regular file" ]] || {
+        echo "✖ Invalid login KDF slot metadata: $slot_file" >&2
+        exit 1
+    }
+done

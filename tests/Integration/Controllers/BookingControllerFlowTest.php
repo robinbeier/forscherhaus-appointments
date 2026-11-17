@@ -1319,9 +1319,11 @@ class BookingControllerFlowTest extends TestCase
         $this->assertIsArray($appointmentData);
         $this->assertIsArray($providerData);
         $this->assertIsArray($customerData);
-        $this->assertSame($appointmentId, (int) $appointmentData['id']);
-        $this->assertSame($pair['provider_id'], (int) $providerData['id']);
-        $this->assertSame($customerId, (int) $customerData['id']);
+        $this->assertSame($appointmentId, $appointmentData['id']);
+        $this->assertSame($pair['provider_id'], $providerData['id']);
+        $this->assertSame($customerId, $customerData['id']);
+        $this->assertIsArray($providerData['services'] ?? null);
+        $this->assertContains($pair['service_id'], $providerData['services']);
     }
 
     public function testRescheduleCustomerTokenUsesCustomerReturnedByLockedAuthority(): void
@@ -1362,12 +1364,43 @@ class BookingControllerFlowTest extends TestCase
             ): string|bool {
                 $this->combinedMethodCalled = true;
 
+                // Model a concurrent canonical edit completed before the
+                // authority transaction returns. The controller must render
+                // the projection bound to the locked authority state.
+                get_instance()->db->update(
+                    'appointments',
+                    ['id_users_customer' => $this->lockedCustomerId],
+                    ['id' => $appointment_id],
+                );
+
                 return $token_writer($this->lockedCustomerId);
             }
 
             public function issue(int $appointment_id, string $presented_hash): void
             {
                 $this->legacyMethodCalled = true;
+            }
+
+            public function issueWithPrivacyTokenAndProjection(
+                int $appointment_id,
+                string $presented_hash,
+                callable $token_writer,
+                ?callable $rollback_writer = null,
+            ): array {
+                $token = $this->issueWithPrivacyToken($appointment_id, $presented_hash, $token_writer);
+                $appointment = get_instance()->db->get_where('appointments', ['id' => $appointment_id])->row_array();
+                return [
+                    'customer_token' => $token,
+                    'customer_id' => $this->lockedCustomerId,
+                    'appointment' => $appointment,
+                    'customer' => get_instance()->db->get_where('users', ['id' => $appointment['id_users_customer']])->row_array(),
+                    'provider' => get_instance()->db->get_where('users', ['id' => $appointment['id_users_provider']])->row_array(),
+                ];
+            }
+
+            public function verifiedAppointmentIdForRead(?int $appointment_id): ?int
+            {
+                return $appointment_id;
             }
         };
 
@@ -1376,10 +1409,15 @@ class BookingControllerFlowTest extends TestCase
         $controller->cache = new class ($savedCustomerId, $savedTokenKey) {
             public function __construct(private mixed &$savedCustomerId, private mixed &$savedTokenKey) {}
 
+            public function get(string $key): mixed
+            {
+                return false;
+            }
+
             public function save(string $key, mixed $value, int $ttl): bool
             {
                 $this->savedTokenKey = $key;
-                $this->savedCustomerId = (int) $value;
+                $this->savedCustomerId = $value;
 
                 return true;
             }
@@ -1392,9 +1430,223 @@ class BookingControllerFlowTest extends TestCase
         $this->assertFalse($legacyMethodCalled);
         $this->assertIsString($renderedToken);
         $this->assertNotSame('', $renderedToken);
-        $this->assertSame('customer-token-v2-' . $renderedToken, $savedTokenKey);
-        $this->assertSame($customerBId, $savedCustomerId);
-        $this->assertNotSame($customerAId, $savedCustomerId);
+        $this->assertSame('customer-token-v3-' . $appointmentId, $savedTokenKey);
+        $this->assertIsArray($savedCustomerId);
+        $this->assertSame($renderedToken, $savedCustomerId['token'] ?? null);
+        $this->assertSame($customerBId, $savedCustomerId['customer_id'] ?? null);
+        $this->assertNotSame($customerAId, $savedCustomerId['customer_id'] ?? null);
+        $renderedCustomer = script_vars('customer_data');
+        $this->assertSame($customerBId, (int) ($renderedCustomer['id'] ?? 0));
+        $this->assertSame('Locked', (string) ($renderedCustomer['first_name'] ?? ''));
+    }
+
+    public function testRescheduleStopsWhenAuthoritySnapshotDriftsBeforeProjection(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customerId = $this->fixtures->createCustomer(['first_name' => 'Before drift']);
+        $appointmentId = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customerId,
+            $pair['service_id'],
+            new DateTimeImmutable('+2 days 10:20:00'),
+        );
+        $appointment = $this->fixtures->findAppointmentById($appointmentId);
+        $this->assertNotNull($appointment);
+
+        $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
+        $controller->reschedule_authority = new class ($controller) extends \Reschedule_authority {
+            public function issueWithPrivacyToken(
+                int $appointment_id,
+                string $presented_hash,
+                callable $token_writer,
+            ): string|bool {
+                return $token_writer(1);
+            }
+
+            public function issueWithPrivacyTokenAndProjection(
+                int $appointment_id,
+                string $presented_hash,
+                callable $token_writer,
+                ?callable $rollback_writer = null,
+            ): array {
+                $token = $this->issueWithPrivacyToken($appointment_id, $presented_hash, $token_writer);
+                $appointment = get_instance()->db->get_where('appointments', ['id' => $appointment_id])->row_array();
+                return [
+                    'customer_token' => $token,
+                    'customer_id' => 999999,
+                    'appointment' => $appointment,
+                    'customer' => get_instance()->db->get_where('users', ['id' => $appointment['id_users_customer']])->row_array(),
+                    'provider' => get_instance()->db->get_where('users', ['id' => $appointment['id_users_provider']])->row_array(),
+                ];
+            }
+
+            public function verifiedAppointmentIdForRead(?int $appointment_id): ?int
+            {
+                return null;
+            }
+        };
+
+        $this->visitReschedule($controller, (string) $appointment['hash']);
+
+        $this->assertTrue((bool) html_vars('show_message'));
+        $this->assertSame(lang('appointment_not_found'), html_vars('message_title'));
+        $this->assertFalse((bool) script_vars('manage_mode'));
+    }
+
+    public function testRescheduleDoesNotRotatePrivacyCacheWhenAuthorityCommitFails(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customerId = $this->fixtures->createCustomer(['first_name' => 'Commit failure']);
+        $appointmentId = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customerId,
+            $pair['service_id'],
+            new DateTimeImmutable('+2 days 10:25:00'),
+        );
+        $appointment = $this->fixtures->findAppointmentById($appointmentId);
+        $this->assertNotNull($appointment);
+
+        $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
+        $controller->setCustomerTokenClock(1_000_000);
+        $controller->reschedule_authority = new class ($controller) extends \Reschedule_authority {
+            public function __construct(private Booking $bookingController) {}
+
+            public function issueWithPrivacyTokenAndProjection(
+                int $appointment_id,
+                string $presented_hash,
+                callable $token_writer,
+                ?callable $rollback_writer = null,
+            ): array {
+                $token_writer(1);
+                $this->bookingController->setCustomerTokenClock(1_000_006);
+                if ($rollback_writer !== null) {
+                    $rollback_writer();
+                }
+                throw new \RuntimeException('synthetic authority commit failure');
+            }
+        };
+        $saveCalls = 0;
+        $cacheDeadline = 1_000_100;
+        $restoredTtl = null;
+        $oldEntry = ['token' => 'old-v3-token', 'customer_id' => $customerId, 'appointment_id' => $appointmentId];
+        $controller->cache = new class ($saveCalls, $oldEntry, $cacheDeadline, $restoredTtl) {
+            public function __construct(
+                private int &$saveCalls,
+                private array &$oldEntry,
+                private int &$cacheDeadline,
+                private mixed &$restoredTtl,
+            ) {}
+
+            public function get(string $key): array
+            {
+                return $this->oldEntry;
+            }
+
+            public function get_metadata(string $key): array
+            {
+                return ['expire' => $this->cacheDeadline];
+            }
+
+            public function save(string $key, mixed $value, int $ttl): bool
+            {
+                $this->saveCalls++;
+                if (($value['token'] ?? null) === 'old-v3-token') {
+                    $this->restoredTtl = $ttl;
+                }
+                $this->oldEntry = $value;
+
+                return true;
+            }
+
+            public function delete(string $key): bool
+            {
+                $this->oldEntry = [];
+
+                return true;
+            }
+        };
+
+        try {
+            $this->visitReschedule($controller, (string) $appointment['hash']);
+            self::fail('Expected the synthetic authority failure.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('synthetic authority commit failure', $exception->getMessage());
+        }
+
+        self::assertGreaterThanOrEqual(2, $saveCalls, 'The failed commit must rotate under lock and then compensate.');
+        self::assertSame('old-v3-token', $oldEntry['token']);
+        self::assertSame(94, $restoredTtl, 'Compensation must preserve the remaining token lifetime.');
+    }
+
+    public function testRescheduleDoesNotRestoreExpiredPrivacyCacheEntryAfterCommitFailure(): void
+    {
+        $pair = $this->fixtures->resolveProviderServicePair();
+        $customerId = $this->fixtures->createCustomer(['first_name' => 'Expired cache']);
+        $appointmentId = $this->fixtures->createAppointment(
+            $pair['provider_id'],
+            $customerId,
+            $pair['service_id'],
+            new DateTimeImmutable('+2 days 10:26:00'),
+        );
+        $appointment = $this->fixtures->findAppointmentById($appointmentId);
+        $this->assertNotNull($appointment);
+
+        $controller = $this->createBookingControllerWithForcedAvailability($pair['provider_id']);
+        $controller->setCustomerTokenClock(1_000_000);
+        $controller->reschedule_authority = new class ($controller) extends \Reschedule_authority {
+            public function __construct(private Booking $bookingController) {}
+
+            public function issueWithPrivacyTokenAndProjection(
+                int $appointment_id,
+                string $presented_hash,
+                callable $token_writer,
+                ?callable $rollback_writer = null,
+            ): array {
+                $token_writer(1);
+                $this->bookingController->setCustomerTokenClock(1_000_006);
+                if ($rollback_writer !== null) {
+                    $rollback_writer();
+                }
+                throw new \RuntimeException('synthetic authority commit failure');
+            }
+        };
+        $oldEntry = ['token' => 'expired-v3-token', 'customer_id' => $customerId, 'appointment_id' => $appointmentId];
+        $controller->cache = new class ($oldEntry) {
+            public function __construct(private array &$entry) {}
+
+            public function get(string $key): array
+            {
+                return $this->entry;
+            }
+
+            public function get_metadata(string $key): array
+            {
+                return ['expire' => 1_000_005];
+            }
+
+            public function save(string $key, mixed $value, int $ttl): bool
+            {
+                $this->entry = $value;
+
+                return true;
+            }
+
+            public function delete(string $key): bool
+            {
+                $this->entry = [];
+
+                return true;
+            }
+        };
+
+        try {
+            $this->visitReschedule($controller, (string) $appointment['hash']);
+            self::fail('Expected the synthetic authority failure.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('synthetic authority commit failure', $exception->getMessage());
+        }
+
+        self::assertSame([], $oldEntry, 'An expired token must not be restored after compensation.');
     }
 
     public function testCustomerReassignmentRetiresOldHashAndIssuesNewManageLink(): void
@@ -1573,6 +1825,7 @@ class BookingControllerFlowTest extends TestCase
     {
         $controller = new class ($providerId) extends Booking {
             private ?int $forcedProviderId;
+            private ?int $customerTokenClock = null;
 
             public function __construct(?int $forcedProviderId)
             {
@@ -1582,6 +1835,16 @@ class BookingControllerFlowTest extends TestCase
             protected function check_datetime_availability(array $appointment): ?int
             {
                 return $this->forcedProviderId;
+            }
+
+            public function setCustomerTokenClock(int $now): void
+            {
+                $this->customerTokenClock = $now;
+            }
+
+            protected function customerTokenNow(): int
+            {
+                return $this->customerTokenClock ?? time();
             }
         };
 
@@ -1718,8 +1981,44 @@ class BookingControllerFlowTest extends TestCase
         $controller->output = $CI->output;
         if ($injectCache) {
             $controller->cache = new class {
-                public function save(...$args): bool
+                /** @var array<string, array{value:mixed,expire:int}> */
+                private array $entries = [];
+
+                public function save(string $key, mixed $value, int $ttl): bool
                 {
+                    $this->entries[$key] = ['value' => $value, 'expire' => time() + $ttl];
+
+                    return true;
+                }
+
+                public function get(string $key): mixed
+                {
+                    $entry = $this->entries[$key] ?? null;
+                    if ($entry === null || $entry['expire'] <= time()) {
+                        unset($this->entries[$key]);
+
+                        return false;
+                    }
+
+                    return $entry['value'];
+                }
+
+                public function get_metadata(string $key): array|false
+                {
+                    $entry = $this->entries[$key] ?? null;
+                    if ($entry === null || $entry['expire'] <= time()) {
+                        unset($this->entries[$key]);
+
+                        return false;
+                    }
+
+                    return ['expire' => $entry['expire']];
+                }
+
+                public function delete(string $key): bool
+                {
+                    unset($this->entries[$key]);
+
                     return true;
                 }
             };

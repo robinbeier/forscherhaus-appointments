@@ -40,8 +40,8 @@ final class PrivacyControllerCacheTest extends TestCase
     {
         $constant = new \ReflectionClass(Privacy::class);
 
-        $this->assertSame('customer-token-v2-', $constant->getConstant('CUSTOMER_TOKEN_CACHE_PREFIX'));
-        $this->assertNotSame('customer-token-', $constant->getConstant('CUSTOMER_TOKEN_CACHE_PREFIX'));
+        $this->assertSame('customer-token-v3-', $constant->getConstant('CUSTOMER_TOKEN_V3_CACHE_PREFIX'));
+        $this->assertNotSame('customer-token-v2-', $constant->getConstant('CUSTOMER_TOKEN_V3_CACHE_PREFIX'));
     }
 
     public function testCustomerTokenCacheReturnsExistingCacheFromController(): void
@@ -49,7 +49,7 @@ final class PrivacyControllerCacheTest extends TestCase
         $cache = new class {
             public function get(string $key): ?int
             {
-                return $key === 'customer-token-v2-known' ? 42 : null;
+                return $key === 'customer-token-v3-42' ? 42 : null;
             }
         };
 
@@ -69,7 +69,7 @@ final class PrivacyControllerCacheTest extends TestCase
         $cache = new class {
             public function get(string $key): ?int
             {
-                return $key === 'customer-token-v2-known' ? 42 : null;
+                return $key === 'customer-token-v3-42' ? 42 : null;
             }
         };
 
@@ -98,7 +98,7 @@ final class PrivacyControllerCacheTest extends TestCase
         $validCache = new class {
             public function get(string $key): ?int
             {
-                return $key === 'customer-token-v2-known' ? 42 : null;
+                return $key === 'customer-token-v3-42' ? 42 : null;
             }
         };
 
@@ -121,7 +121,7 @@ final class PrivacyControllerCacheTest extends TestCase
         $cache = new class {
             public function get(string $key): ?int
             {
-                return $key === 'customer-token-v2-known' ? 42 : null;
+                return $key === 'customer-token-v3-42' ? 42 : null;
             }
         };
 

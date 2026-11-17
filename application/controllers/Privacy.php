@@ -20,7 +20,7 @@
  */
 class Privacy extends EA_Controller
 {
-    private const CUSTOMER_TOKEN_CACHE_PREFIX = 'customer-token-v2-';
+    private const CUSTOMER_TOKEN_V3_CACHE_PREFIX = 'customer-token-v3-';
     /**
      * Privacy constructor.
      */
@@ -62,7 +62,47 @@ class Privacy extends EA_Controller
                 );
             }
 
-            $customer_id = $cache->get(self::CUSTOMER_TOKEN_CACHE_PREFIX . $customer_token);
+            $customer_id = null;
+            $privacy_appointment_id = null;
+            $privacy_token_is_current = null;
+
+            // v3 keeps one bounded cache entry per appointment while retaining
+            // a fresh random token for every page view. The exact token is
+            // compared server-side before the associated customer is used.
+            if (preg_match('/\Av3-([1-9][0-9]{0,18})-([A-Za-z0-9_-]{43})\z/D', $customer_token, $matches) === 1) {
+                $appointment_id = (int) $matches[1];
+                if ($appointment_id <= 0 || (string) $appointment_id !== $matches[1]) {
+                    throw new InvalidArgumentException('Invalid customer token value provided.');
+                }
+
+                $entry = $cache->get(self::CUSTOMER_TOKEN_V3_CACHE_PREFIX . $matches[1]);
+                if (
+                    is_array($entry) &&
+                    isset($entry['token'], $entry['customer_id'], $entry['appointment_id']) &&
+                    is_string($entry['token']) &&
+                    hash_equals($entry['token'], $customer_token) &&
+                    (int) $entry['appointment_id'] === $appointment_id &&
+                    (string) (int) $entry['appointment_id'] === $matches[1]
+                ) {
+                    $customer_id = (int) $entry['customer_id'];
+                    $privacy_appointment_id = $appointment_id;
+                    $privacy_token_is_current = static function () use (
+                        $cache,
+                        $matches,
+                        $customer_token,
+                        $customer_id,
+                        $appointment_id,
+                    ): bool {
+                        $current = $cache->get(self::CUSTOMER_TOKEN_V3_CACHE_PREFIX . $matches[1]);
+
+                        return is_array($current) &&
+                            is_string($current['token'] ?? null) &&
+                            hash_equals($current['token'], $customer_token) &&
+                            (int) ($current['customer_id'] ?? 0) === $customer_id &&
+                            (int) ($current['appointment_id'] ?? 0) === $appointment_id;
+                    };
+                }
+            }
 
             if (empty($customer_id)) {
                 throw new InvalidArgumentException(
@@ -70,7 +110,7 @@ class Privacy extends EA_Controller
                 );
             }
 
-            $this->customers_model->delete($customer_id);
+            $this->customers_model->delete($customer_id, $privacy_appointment_id, $privacy_token_is_current);
 
             json_response([
                 'success' => true,

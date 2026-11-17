@@ -125,14 +125,16 @@ class Dashboard extends EA_Controller
      */
     public function provider_metrics(): void
     {
+        $role_guard = false;
         try {
-            if (!$this->hasCurrentDashboardRole(DB_SLUG_PROVIDER)) {
+            if (strtolower((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'post') {
                 json_response(['success' => false, 'message' => 'Forbidden'], 403);
 
                 return;
             }
 
-            if (strtolower((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'post') {
+            $role_guard = $this->beginDashboardRoleGuard(DB_SLUG_PROVIDER);
+            if (!$role_guard) {
                 json_response(['success' => false, 'message' => 'Forbidden'], 403);
 
                 return;
@@ -152,11 +154,15 @@ class Dashboard extends EA_Controller
             $payload = $this->buildProviderDashboardPayload($provider_id, $period->start, $period->end);
 
             $this->persistProviderDashboardRange($provider_id, $period->start, $period->end);
+            $this->commitDashboardRoleGuard($role_guard);
+            $role_guard = false;
 
             json_response($payload);
         } catch (InvalidArgumentException $e) {
+            $this->rollbackDashboardRoleGuard($role_guard);
             json_response(['success' => false, 'message' => $e->getMessage()], 422);
         } catch (Throwable $e) {
+            $this->rollbackDashboardRoleGuard($role_guard);
             json_exception($e);
         }
     }
@@ -166,14 +172,16 @@ class Dashboard extends EA_Controller
      */
     public function metrics(): void
     {
+        $role_guard = false;
         try {
-            if (!$this->hasCurrentDashboardRole(DB_SLUG_ADMIN)) {
+            if (strtolower((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'post') {
                 json_response(['success' => false, 'message' => 'Forbidden'], 403);
 
                 return;
             }
 
-            if (strtolower((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'post') {
+            $role_guard = $this->beginDashboardRoleGuard(DB_SLUG_ADMIN);
+            if (!$role_guard) {
                 json_response(['success' => false, 'message' => 'Forbidden'], 403);
 
                 return;
@@ -194,14 +202,18 @@ class Dashboard extends EA_Controller
             $summary = $this->dashboard_metrics->summarize($metrics, $threshold);
 
             $this->persistProviderDashboardRange((int) session('user_id'), $period->start, $period->end);
+            $this->commitDashboardRoleGuard($role_guard);
+            $role_guard = false;
 
             json_response([
                 'metrics' => $metrics,
                 'summary' => $this->buildAdminSummary($summary, $threshold),
             ]);
         } catch (InvalidArgumentException $e) {
+            $this->rollbackDashboardRoleGuard($role_guard);
             json_response(['success' => false, 'message' => $e->getMessage()], 422);
         } catch (Throwable $e) {
+            $this->rollbackDashboardRoleGuard($role_guard);
             json_exception($e);
         }
     }
@@ -211,14 +223,18 @@ class Dashboard extends EA_Controller
      */
     public function threshold(): void
     {
+        $role_guard = false;
+        $previous_threshold = null;
+        $threshold_write_started = false;
         try {
-            if (!$this->hasCurrentDashboardRole(DB_SLUG_ADMIN)) {
+            if (strtolower((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'post') {
                 json_response(['success' => false, 'message' => 'Forbidden'], 403);
 
                 return;
             }
 
-            if (strtolower((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'post') {
+            $role_guard = $this->beginDashboardRoleGuard(DB_SLUG_ADMIN);
+            if (!$role_guard) {
                 json_response(['success' => false, 'message' => 'Forbidden'], 403);
 
                 return;
@@ -228,15 +244,28 @@ class Dashboard extends EA_Controller
                 $this->getThresholdValidationMessage(),
             )->threshold;
 
+            $previous_threshold = session('dashboard_conflict_threshold');
+            $threshold_write_started = true;
             $this->persistThreshold($threshold);
+            $this->commitDashboardRoleGuard($role_guard);
+            $role_guard = false;
+            $threshold_write_started = false;
 
             json_response([
                 'success' => true,
                 'threshold' => $threshold,
             ]);
         } catch (InvalidArgumentException $e) {
+            if ($threshold_write_started) {
+                session(['dashboard_conflict_threshold' => $previous_threshold]);
+            }
+            $this->rollbackDashboardRoleGuard($role_guard);
             json_response(['success' => false, 'message' => $e->getMessage()], 422);
         } catch (Throwable $e) {
+            if ($threshold_write_started) {
+                session(['dashboard_conflict_threshold' => $previous_threshold]);
+            }
+            $this->rollbackDashboardRoleGuard($role_guard);
             json_exception($e);
         }
     }
@@ -320,14 +349,16 @@ class Dashboard extends EA_Controller
      */
     public function heatmap(): void
     {
+        $role_guard = false;
         try {
-            if (!$this->hasCurrentDashboardRole(DB_SLUG_ADMIN)) {
+            if (strtolower((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'post') {
                 json_response(['success' => false, 'message' => 'Forbidden'], 403);
 
                 return;
             }
 
-            if (strtolower((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'post') {
+            $role_guard = $this->beginDashboardRoleGuard(DB_SLUG_ADMIN);
+            if (!$role_guard) {
                 json_response(['success' => false, 'message' => 'Forbidden'], 403);
 
                 return;
@@ -342,12 +373,98 @@ class Dashboard extends EA_Controller
                 'service_id' => $filters->serviceId,
                 'provider_ids' => $filters->providerIds,
             ]);
+            $this->commitDashboardRoleGuard($role_guard);
+            $role_guard = false;
 
             json_response($heatmap);
         } catch (InvalidArgumentException $e) {
+            $this->rollbackDashboardRoleGuard($role_guard);
             json_response(['success' => false, 'message' => $e->getMessage()], 422);
         } catch (Throwable $e) {
+            $this->rollbackDashboardRoleGuard($role_guard);
             json_exception($e);
+        }
+    }
+
+    /**
+     * Lock the actor row for the duration of a dashboard POST. Role-changing
+     * writes use the same user row, so a demotion cannot commit between the
+     * authorization check and the dashboard read/write.
+     *
+     * @return bool False means the stored role is denied.
+     */
+    protected function beginDashboardRoleGuard(string $expected_role): bool
+    {
+        $db = $this->db;
+        if (!is_object($db) && function_exists('get_instance')) {
+            $db = get_instance()->db ?? null;
+        }
+        if (!is_object($db) || !method_exists($db, 'trans_begin')) {
+            throw new RuntimeException('Dashboard authorization database unavailable.');
+        }
+        $this->db = $db;
+
+        $user_id = (int) session('user_id');
+        if ($user_id <= 0 || session('role_slug') !== $expected_role) {
+            return false;
+        }
+
+        if (!$db->trans_begin()) {
+            throw new RuntimeException('Could not begin dashboard actor guard.');
+        }
+
+        try {
+            $users_table = $db->dbprefix('users');
+            $roles_table = $db->dbprefix('roles');
+            $actor_query = $db->query(
+                "SELECT id_roles FROM {$users_table} WHERE id = ? FOR UPDATE",
+                [$user_id],
+            );
+
+            if ($actor_query === false) {
+                throw new RuntimeException('Could not lock dashboard actor role.');
+            }
+
+            $actor = $actor_query->row_array();
+            if (empty($actor['id_roles'])) {
+                $db->trans_rollback();
+
+                return false;
+            }
+
+            $role_query = $db->query(
+                "SELECT slug FROM {$roles_table} WHERE id = ?",
+                [(int) $actor['id_roles']],
+            );
+            if ($role_query === false) {
+                throw new RuntimeException('Could not read dashboard actor role.');
+            }
+
+            $role = $role_query->row_array();
+            if (($role['slug'] ?? null) !== $expected_role) {
+                $db->trans_rollback();
+
+                return false;
+            }
+
+            return true;
+        } catch (Throwable $error) {
+            $db->trans_rollback();
+            throw $error;
+        }
+    }
+
+    protected function commitDashboardRoleGuard(bool $role_guard): void
+    {
+        if ($role_guard === true && !$this->db->trans_commit()) {
+            throw new RuntimeException('Could not commit dashboard actor guard.');
+        }
+    }
+
+    protected function rollbackDashboardRoleGuard(bool $role_guard): void
+    {
+        if ($role_guard === true) {
+            $this->db->trans_rollback();
         }
     }
 

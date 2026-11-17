@@ -43,6 +43,52 @@ final class AccountsPasswordSnapshotTest extends TestCase
         }
     }
 
+    public function testKdfPermitSaturationFailsClosedBeforeAnyCredentialWork(): void
+    {
+        $result = $this->probe('legacy', 'active', 'stable', 'capacity');
+
+        self::assertTrue($result['capacity_denied']);
+        self::assertFalse($result['authenticated']);
+        self::assertSame(1, $result['reads'], 'Capacity denial happens after bounded account lookup but before KDF work.');
+        self::assertFalse($result['modern'], 'Capacity denial must happen before legacy password rehash.');
+    }
+
+    public function testKdfPermitRejectsHardlinkedSlotBeforeCredentialWork(): void
+    {
+        $result = $this->probe('legacy', 'active', 'stable', 'hardlink');
+
+        self::assertTrue($result['capacity_denied']);
+        self::assertFalse($result['authenticated']);
+        self::assertSame(1, $result['reads']);
+    }
+
+    public function testKdfPermitRetainsLegacyWebDataOwnershipForCliWithoutOverride(): void
+    {
+        if (!function_exists('posix_getpwnam') || !is_array($webAccount = @posix_getpwnam('www-data')) || !function_exists('posix_getgrnam') || !is_array($webGroup = @posix_getgrnam('www-data'))) {
+            self::markTestSkipped('Legacy CLI ownership account is unavailable in this runtime.');
+        }
+        if (!function_exists('posix_geteuid') || !function_exists('posix_getegid') || (
+            posix_geteuid() !== 0 &&
+            (posix_geteuid() !== (int) $webAccount['uid'] || posix_getegid() !== (int) $webGroup['gid'])
+        )) {
+            self::markTestSkipped('Legacy CLI ownership fixture requires root or the www-data identity.');
+        }
+
+        $result = $this->probe('legacy', 'active', 'stable', 'cli-default');
+
+        self::assertTrue($result['authenticated']);
+        self::assertSame(2, $result['reads']);
+    }
+
+    public function testKdfPermitRejectsSlotWithMismatchedRuntimeOwnership(): void
+    {
+        $result = $this->probe('legacy', 'active', 'stable', 'runtime-mismatch');
+
+        self::assertTrue($result['capacity_denied']);
+        self::assertFalse($result['authenticated']);
+        self::assertSame(1, $result['reads']);
+    }
+
     public function testLdapLinkedAccountNeverAuthenticatesWithRetainedLocalVerifier(): void
     {
         foreach (['legacy', 'modern'] as $format) {

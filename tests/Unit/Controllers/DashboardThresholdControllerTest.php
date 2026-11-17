@@ -44,6 +44,28 @@ class DashboardThresholdControllerTest extends TestCase
         $this->assertTrue($response['success']);
         $this->assertSame(0.82, $response['threshold']);
         $this->assertSame([0.82], $controller->savedThresholds);
+        $this->assertSame(['begin', 'persist', 'commit'], $controller->events);
+        $this->assertSame('0.82', session('dashboard_conflict_threshold'));
+    }
+
+    public function testThresholdRollsBackWhenGuardCommitFails(): void
+    {
+        $_SERVER['REQUEST_METHOD'] = 'POST';
+        session([
+            'role_slug' => DB_SLUG_ADMIN,
+            'user_id' => 7,
+            'dashboard_conflict_threshold' => '0.61',
+        ]);
+        $_POST = ['threshold' => '0.82'];
+
+        $controller = $this->createController();
+        $controller->throwOnCommit = true;
+
+        $controller->threshold();
+
+        $this->assertSame(['begin', 'persist', 'commit', 'rollback'], $controller->events);
+        $this->assertSame([0.82], $controller->savedThresholds);
+        $this->assertSame('0.61', session('dashboard_conflict_threshold'));
     }
 
     public function testThresholdAcceptsBoundaryValues(): void
@@ -119,6 +141,7 @@ class DashboardThresholdControllerTest extends TestCase
             $this->assertFalse($response['success']);
             $this->assertSame(lang('dashboard_conflict_threshold_invalid'), $response['message']);
             $this->assertSame([], $controller->savedThresholds);
+            $this->assertSame(['begin', 'rollback'], $controller->events);
 
             get_instance()->output->set_output('');
         }
@@ -144,6 +167,7 @@ class DashboardThresholdControllerTest extends TestCase
         $this->assertFalse($response['success']);
         $this->assertSame('Forbidden', $response['message']);
         $this->assertSame([], $controller->savedThresholds);
+        $this->assertSame([], $controller->events);
     }
 
     public function testThresholdRejectsGetRequest(): void
@@ -194,6 +218,8 @@ class DashboardThresholdControllerTest extends TestCase
     {
         return new class extends Dashboard {
             public array $savedThresholds = [];
+            public array $events = [];
+            public bool $throwOnCommit = false;
 
             public function __construct() {}
 
@@ -202,9 +228,33 @@ class DashboardThresholdControllerTest extends TestCase
                 return session('role_slug') === $expected_role && (int) session('user_id') > 0;
             }
 
+            protected function beginDashboardRoleGuard(string $expected_role): bool
+            {
+                if (session('role_slug') !== $expected_role || (int) session('user_id') <= 0) {
+                    return false;
+                }
+                $this->events[] = 'begin';
+                return true;
+            }
+
+            protected function commitDashboardRoleGuard(bool $role_guard): void
+            {
+                $this->events[] = 'commit';
+                if ($this->throwOnCommit) {
+                    throw new \RuntimeException('synthetic commit failure');
+                }
+            }
+
+            protected function rollbackDashboardRoleGuard(bool $role_guard): void
+            {
+                $this->events[] = 'rollback';
+            }
+
             protected function persistThreshold(float $threshold): void
             {
+                $this->events[] = 'persist';
                 $this->savedThresholds[] = $threshold;
+                session(['dashboard_conflict_threshold' => (string) $threshold]);
             }
         };
     }
@@ -218,6 +268,13 @@ class DashboardThresholdControllerTest extends TestCase
             {
                 return session('role_slug') === $expected_role && (int) session('user_id') > 0;
             }
+
+            protected function beginDashboardRoleGuard(string $expected_role): bool
+            {
+                return session('role_slug') === $expected_role && (int) session('user_id') > 0;
+            }
+            protected function commitDashboardRoleGuard(bool $role_guard): void {}
+            protected function rollbackDashboardRoleGuard(bool $role_guard): void {}
         };
     }
 

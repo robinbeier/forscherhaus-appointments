@@ -90,7 +90,8 @@ final class PrivacyDeleteHttpTest extends TestCase
         $before = $this->ownedState($appointment, $buffer);
         $client = $server->client();
         $token = $this->customerToken($client, (string) $appointment['hash']);
-        $cacheKeys = ['customer-token-v2-' . $token];
+        $cacheKeys = [$this->customerTokenCacheKey($token)];
+        $compatibilityCustomer = null;
 
         try {
             $directClient = new \ReleaseGate\GateHttpClient($server->baseUrl, '');
@@ -132,10 +133,11 @@ final class PrivacyDeleteHttpTest extends TestCase
             self::assertSame(403, $invalidCsrf->statusCode);
             self::assertSame($before, $this->ownedState($appointment, $buffer));
 
-            $invalidToken = str_repeat('invalid-token-', 8);
-            $invalid = $client->post(self::ENDPOINT, ['customer_token' => $invalidToken]);
-            self::assertSame(500, $invalid->statusCode);
-            self::assertSame($before, $this->ownedState($appointment, $buffer));
+            foreach (['invalid-token-' . $fixture->run, '../customer-token-v2-secret', 'v3-99999999999999999999-' . str_repeat('A', 43)] as $invalidToken) {
+                $invalid = $client->post(self::ENDPOINT, ['customer_token' => $invalidToken]);
+                self::assertSame(500, $invalid->statusCode);
+                self::assertSame($before, $this->ownedState($appointment, $buffer));
+            }
 
             $expiredToken = 'expired-' . $fixture->run;
             $this->cacheToken($expiredToken, $fixture->customerId, 1);
@@ -151,8 +153,34 @@ final class PrivacyDeleteHttpTest extends TestCase
             $foreign = $client->post(self::ENDPOINT, ['customer_token' => $foreignToken]);
             self::assertSame(500, $foreign->statusCode);
             self::assertSame($before, $this->ownedState($appointment, $buffer));
+
+            $compatibilityPayload = $fixture->customerWritePayload('v2_compatibility');
+            $customerRole = get_instance()->db->get_where('roles', ['slug' => 'customer'])->row_array();
+            self::assertNotEmpty($customerRole);
+            self::assertTrue(get_instance()->db->insert('users', array_merge($compatibilityPayload, [
+                'timezone' => 'UTC',
+                'language' => 'english',
+                'id_roles' => (int) $customerRole['id'],
+                'is_private' => 0,
+            ])));
+            $compatibilityCustomer = (int) get_instance()->db->insert_id();
+            $compatibilityToken = bin2hex(random_bytes(32));
+            $this->cacheToken($compatibilityToken, $compatibilityCustomer, 600);
+            $cacheKeys[] = 'customer-token-v2-' . $compatibilityToken;
+            $compatibility = $client->post(self::ENDPOINT, ['customer_token' => $compatibilityToken]);
+            self::assertSame(500, $compatibility->statusCode);
+            self::assertStringNotContainsString('"success":true', $compatibility->body);
+            self::assertNotSame([], $fixture->row('users', $compatibilityCustomer));
+            self::assertSame($before, $this->ownedState($appointment, $buffer));
         } finally {
-            $this->deleteCacheKeys($cacheKeys);
+            try {
+                $this->deleteCacheKeys($cacheKeys);
+            } finally {
+                if ($compatibilityCustomer !== null) {
+                    self::assertTrue(get_instance()->db->delete('users', ['id' => $compatibilityCustomer]));
+                    self::assertSame([], $fixture->row('users', $compatibilityCustomer));
+                }
+            }
         }
     }
 
@@ -167,7 +195,7 @@ final class PrivacyDeleteHttpTest extends TestCase
         $buffer = $this->addBuffer($appointment);
         $client = $server->client();
         $token = $this->customerToken($client, (string) $appointment['hash']);
-        $cacheKey = 'customer-token-v2-' . $token;
+        $cacheKey = $this->customerTokenCacheKey($token);
         $legacyToken = 'legacy-' . $fixture->run;
         $cache = get_instance()->cache ?? null;
         if (!is_object($cache) || !method_exists($cache, 'save')) {
@@ -179,6 +207,12 @@ final class PrivacyDeleteHttpTest extends TestCase
         self::assertSame(500, $legacyResponse->statusCode);
         self::assertNotSame([], $fixture->row('users', $fixture->customerId));
         $legacyCacheKey = 'customer-token-' . $legacyToken;
+        $oldV3Token = $token;
+        $token = $this->customerToken($client, (string) $appointment['hash']);
+        self::assertNotSame($oldV3Token, $token);
+        $staleResponse = $client->post(self::ENDPOINT, ['customer_token' => $oldV3Token]);
+        self::assertSame(500, $staleResponse->statusCode);
+        self::assertNotSame([], $fixture->row('users', $fixture->customerId));
         $providerBefore = $fixture->row('users', $fixture->providerId);
         $adminBefore = $fixture->row('users', $fixture->actorId);
         $serviceBefore = $fixture->row('services', $fixture->serviceId);
@@ -218,7 +252,7 @@ final class PrivacyDeleteHttpTest extends TestCase
         $before = $this->ownedState($appointment, $buffer);
         $client = $server->client();
         $token = $this->customerToken($client, (string) $appointment['hash']);
-        $cacheKey = 'customer-token-v2-' . $token;
+        $cacheKey = $this->customerTokenCacheKey($token);
         $trigger = $fixture->run . '_deny_privacy_delete';
         $rollbackMarker = self::ROLLBACK_MARKER . ':' . $fixture->run;
         $fixtureAdmin = null;
@@ -310,6 +344,179 @@ final class PrivacyDeleteHttpTest extends TestCase
         }
     }
 
+    public function testV3DeleteRechecksAppointmentCustomerAfterConcurrentReassignment(): void
+    {
+        $fixture = $this->fixture;
+        $server = $this->server;
+        self::assertNotNull($fixture);
+        self::assertNotNull($server);
+
+        $db = get_instance()->db;
+        $appointment = $fixture->appointment();
+        $buffer = $this->addBuffer($appointment);
+        $before = $this->ownedState($appointment, $buffer);
+        $client = $server->client();
+        $token = $this->customerToken($client, (string) $appointment['hash']);
+        $cacheKey = $this->customerTokenCacheKey($token);
+        $foreignCustomer = null;
+        $observer = null;
+        $multi = null;
+        $handle = null;
+        $transactionOpen = false;
+
+        try {
+            $customerRole = $db->get_where('roles', ['slug' => 'customer'])->row_array();
+            self::assertNotEmpty($customerRole);
+            self::assertTrue($db->insert('users', [
+                'first_name' => 'Synthetic',
+                'last_name' => 'privacy-race-foreign',
+                'email' => $fixture->run . '_privacy-race-foreign@synthetic.invalid',
+                'phone_number' => '000000000',
+                'notes' => $fixture->run,
+                'timezone' => 'UTC',
+                'language' => 'english',
+                'id_roles' => (int) $customerRole['id'],
+                'is_private' => 0,
+            ]));
+            $foreignCustomer = (int) $db->insert_id();
+
+            $observer = get_instance()->load->database([
+                'hostname' => 'mysql', 'username' => 'root', 'password' => 'secret',
+                'database' => 'easyappointments', 'dbdriver' => 'mysqli',
+                'dbprefix' => $db->dbprefix, 'pconnect' => false, 'db_debug' => false,
+                'char_set' => 'utf8mb4', 'dbcollat' => 'utf8mb4_general_ci',
+            ], true);
+            $ownerId = mysqli_thread_id($db->conn_id);
+            self::assertNotSame($ownerId, mysqli_thread_id($observer->conn_id));
+            self::assertTrue($db->trans_begin());
+            $transactionOpen = true;
+            self::assertTrue($db->update('appointments', [
+                'id_users_customer' => $foreignCustomer,
+            ], ['id' => (int) $appointment['id']]));
+
+            $multi = curl_multi_init();
+            $handle = $this->startPrivacyDeleteRequest($server, $client, $token, $multi);
+            $waiting = false;
+            $deadline = microtime(true) + 8;
+            do {
+                self::assertSame(CURLM_OK, curl_multi_exec($multi, $running));
+                $waiting = $this->observesWait($observer, $ownerId, $db->dbprefix('appointments'));
+                if ($waiting || $running === 0) {
+                    break;
+                }
+                curl_multi_select($multi, 0.05);
+            } while (microtime(true) < $deadline);
+            self::assertTrue($waiting, 'Privacy deletion must wait for the reassigned appointment lock.');
+
+            self::assertTrue($db->trans_commit());
+            $transactionOpen = false;
+            self::assertTrue($this->drain($multi, $handle));
+            self::assertSame(500, (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE));
+            self::assertStringNotContainsString('"success":true', (string) curl_multi_getcontent($handle));
+            self::assertSame($before['customer'], $fixture->row('users', $fixture->customerId));
+            self::assertSame($before['buffer'], $fixture->row('appointments', (int) $buffer['id']));
+            self::assertSame($before['provider'], $fixture->row('users', $fixture->providerId));
+            self::assertSame($before['admin'], $fixture->row('users', $fixture->actorId));
+            self::assertSame($before['service'], $fixture->row('services', $fixture->serviceId));
+            self::assertSame(
+                $foreignCustomer,
+                (int) ($fixture->row('appointments', (int) $appointment['id'])['id_users_customer'] ?? 0),
+            );
+        } finally {
+            if ($transactionOpen && $db->trans_active()) {
+                $db->trans_rollback();
+            }
+            if ($multi instanceof CurlMultiHandle && $handle instanceof CurlHandle) {
+                $this->drain($multi, $handle);
+                curl_multi_remove_handle($multi, $handle);
+            }
+            if ($handle instanceof CurlHandle) {
+                curl_close($handle);
+            }
+            if ($multi instanceof CurlMultiHandle) {
+                curl_multi_close($multi);
+            }
+            if (is_object($observer) && isset($observer->conn_id)) {
+                $observer->close();
+            }
+            if ($foreignCustomer !== null) {
+                $db->update('appointments', ['id_users_customer' => $fixture->customerId], ['id' => (int) $appointment['id']]);
+                $db->delete('users', ['id' => $foreignCustomer]);
+            }
+            $this->deleteCacheKeys([$cacheKey]);
+        }
+    }
+
+    private function startPrivacyDeleteRequest(
+        DefenseCycleHttpServer $server,
+        \ReleaseGate\GateHttpClient $client,
+        string $token,
+        CurlMultiHandle $multi,
+    ): CurlHandle {
+        $cookies = array_map(
+            static fn(array $record): string => $record['name'] . '=' . $record['value'],
+            $client->cookieRecords(),
+        );
+        $handle = curl_init($server->baseUrl . '/index.php/' . self::ENDPOINT);
+        self::assertInstanceOf(CurlHandle::class, $handle);
+        curl_setopt_array($handle, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => http_build_query([
+                'customer_token' => $token,
+                'csrf_token' => $client->getCookie('csrf_cookie'),
+            ]),
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_CONNECTTIMEOUT => 3,
+            CURLOPT_TIMEOUT => 15,
+            CURLOPT_HTTPHEADER => [
+                'Accept: application/json',
+                'Content-Type: application/x-www-form-urlencoded',
+                'Cookie: ' . implode('; ', $cookies),
+            ],
+        ]);
+        self::assertSame(CURLM_OK, curl_multi_add_handle($multi, $handle));
+        return $handle;
+    }
+
+    private function observesWait(object $observer, int $ownerId, string $table): bool
+    {
+        $result = $observer->query(
+            'SELECT l.OBJECT_NAME, COALESCE(s.SQL_TEXT, r.PROCESSLIST_INFO) AS statement_text ' .
+                'FROM performance_schema.data_lock_waits w ' .
+                'JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID ' .
+                'JOIN performance_schema.threads b ON b.THREAD_ID = w.BLOCKING_THREAD_ID ' .
+                'JOIN performance_schema.threads r ON r.THREAD_ID = w.REQUESTING_THREAD_ID ' .
+                'LEFT JOIN performance_schema.events_statements_current s ON s.THREAD_ID = r.THREAD_ID ' .
+                'WHERE b.PROCESSLIST_ID = ' . $ownerId,
+        );
+        self::assertNotFalse($result);
+        foreach ($result->result_array() as $row) {
+            if (
+                $row['OBJECT_NAME'] === $table &&
+                str_contains(strtoupper((string) $row['statement_text']), 'FOR UPDATE')
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function drain(CurlMultiHandle $multi, CurlHandle $handle): bool
+    {
+        $deadline = microtime(true) + 8;
+        do {
+            if (curl_multi_exec($multi, $running) !== CURLM_OK) {
+                return false;
+            }
+            if ($running === 0) {
+                return curl_errno($handle) === CURLE_OK;
+            }
+            curl_multi_select($multi, 0.05);
+        } while (microtime(true) < $deadline);
+        return false;
+    }
+
     private function customerToken(\ReleaseGate\GateHttpClient $client, string $hash): string
     {
         $response = $client->get('booking/reschedule/' . rawurlencode($hash));
@@ -319,8 +526,15 @@ final class PrivacyDeleteHttpTest extends TestCase
         self::assertArrayHasKey(1, $matches);
         $vars = json_decode($matches[1], true, 512, JSON_THROW_ON_ERROR);
         self::assertIsString($vars['customer_token'] ?? null);
-        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $vars['customer_token']);
+        self::assertMatchesRegularExpression('/^v3-[1-9][0-9]{0,18}-[A-Za-z0-9_-]{43}$/', $vars['customer_token']);
         return $vars['customer_token'];
+    }
+
+    private function customerTokenCacheKey(string $token): string
+    {
+        self::assertSame(1, preg_match('/\Av3-([1-9][0-9]{0,18})-[A-Za-z0-9_-]{43}\z/D', $token, $matches));
+
+        return 'customer-token-v3-' . $matches[1];
     }
 
     private function ownedState(array $appointment, array $buffer): array

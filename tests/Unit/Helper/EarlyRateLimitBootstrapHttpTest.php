@@ -74,6 +74,16 @@ final class EarlyRateLimitBootstrapHttpTest extends TestCase
                 self::assertSame([], glob($directory . '/sessions/*'));
                 self::assertSame('', $body);
             }
+            $loginCountPath = $directory . '/cache/login_rate_limit_key_127.0.0.1';
+            $loginRemainPath = $directory . '/cache/login_rate_limit_tmp_127.0.0.1';
+            file_put_contents($loginCountPath, serialize(['time' => time(), 'ttl' => 120, 'data' => 12]));
+            file_put_contents($loginRemainPath, serialize(['time' => time(), 'ttl' => 240, 'data' => time() + 120]));
+            [$status, $headers, $body] = $this->request($address, 'login/validate');
+            self::assertSame(429, $status, $body . file_get_contents($directory . '/server.log'));
+            self::assertMatchesRegularExpression('/Retry-After: [1-9][0-9]*/i', $headers);
+            self::assertStringNotContainsString('ea_session=', $headers);
+            self::assertSame('', $body);
+            self::assertSame(13, unserialize(file_get_contents($loginCountPath), ['allowed_classes' => false])['data']);
             self::assertSame(102, unserialize(file_get_contents($countPath), ['allowed_classes' => false])['data']);
             $routeCountPath = $directory . '/cache/booking_unavailable_dates_rate_limit_key_127.0.0.1';
             $routeRemainPath = $directory . '/cache/booking_unavailable_dates_rate_limit_tmp_127.0.0.1';

@@ -48,6 +48,20 @@ $hook['pre_controller'] = static function (): void {
             'booking_unavailable_dates_rate_limit_tmp_',
         );
     }
+    // Password verification is deliberately expensive for both known and
+    // unknown users. Keep the public login route on a tighter per-source
+    // budget to reduce repeated abuse from one source before KDF work starts.
+    // This does not provide an application-wide or distributed concurrency cap.
+    if ($controller === 'login' && strtolower((string) ($uri->rsegments[2] ?? '')) === 'validate') {
+        Early_rate_limit::enforce(
+            $ip,
+            12,
+            120,
+            $cachePath,
+            'login_rate_limit_key_',
+            'login_rate_limit_tmp_',
+        );
+    }
     Early_rate_limit::enforce($ip, 100, 120, $cachePath);
 };
 

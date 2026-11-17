@@ -63,16 +63,22 @@ den direkten Controllerpfad. Andere Methoden erhalten vor Token-Auswertung oder
 Mutation HTTP 405 mit `Allow: POST`; OPTIONS wird vom globalen Kurzschluss ohne
 Controlleraufruf beantwortet. POST benötigt die bestehende CSRF-Prüfung sowie
 die aktivierte Produkteinstellung. Der Lösch-Token entsteht auf der
-Reschedule-Seite aus kryptografisch sicheren 32 Zufallsbytes, ist im Cache für
-600 Sekunden an die gespeicherte Kunden-ID gebunden und kann keine andere ID aus
-dem Request übernehmen. Das Modell prüft beim Löschen weiterhin die aktuelle
-Kundenrolle und führt die abhängigen Änderungen in einer Transaktion aus.
-
-Der Cache verwendet den Schlüsselpräfix `customer-token-v2-`. Tokens aus der
-älteren Namespace werden abgelehnt; nach Upgrade oder Rückfall muss eine bereits
-geöffnete Seite gegebenenfalls neu geladen werden. Der Token bleibt ausschließlich
-an die gespeicherte Kunden-ID gebunden und erhält durch eine Termin-Neuzuordnung
-keine Berechtigung über den neuen Kunden.
+Reschedule-Seite aus kryptografisch sicheren 32 Zufallsbytes. Neue Seiten
+verwenden die Form `v3-{appointmentId}-{43 Zeichen}` und einen einzelnen
+Cache-Eintrag unter `customer-token-v3-{appointmentId}` mit 600 Sekunden TTL.
+Bei v3-Löschungen sperrt das Modell den Kunden sowie dessen Termine und den
+tokengebundenen Zieltermin in ID-Reihenfolge. Unter diesen Sperren prüft es die
+aktuelle Zuordnung zum gespeicherten Kunden; der exakte aktuelle Cache-Token
+wird vor jeder Mutation erneut gelesen. Eine andere ID aus dem Request kann
+keine Berechtigung übernehmen. Bereits geöffnete v2-Seiten müssen vor einer
+Löschung neu geladen werden: Ihre Cache-Einträge enthalten keine Termin-ID für
+die Transaktionsprüfung. Bestehende v2-Tokens werden abgelehnt und neue nicht
+ausgestellt. Ein Rollback auf Code vor v3 erfordert das Neuladen neuerer Seiten.
+Scheitert die v3-Transaktion, stellt die Kompensation den vorherigen v3-Eintrag
+mit seiner verbleibenden absoluten TTL wieder her oder löscht den neuen Eintrag,
+wenn kein gültiger Vorgänger mehr vorhanden ist. Das Modell prüft beim Löschen
+weiterhin die aktuelle Kundenrolle und führt die abhängigen Änderungen in einer
+Transaktion aus.
 
 `PrivacyDeleteHttpTest` prüft dies mit echten HTTP-Anfragen und einer eigenen
 synthetischen Datenbank: Methoden und direkte Aliase, CSRF, ungültigen,

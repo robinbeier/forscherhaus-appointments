@@ -133,6 +133,15 @@ class Login extends EA_Controller
                 ],
                 200,
             );
+        } catch (AuthenticationCapacityException $e) {
+            header('Retry-After: 2');
+            json_response(
+                [
+                    'success' => false,
+                    'message' => lang('invalid_credentials_provided'),
+                ],
+                429,
+            );
         } catch (Throwable $e) {
             json_exception($e);
         }

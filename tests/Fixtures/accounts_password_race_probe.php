@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+define('ENVIRONMENT', 'testing');
 define('BASEPATH', __DIR__);
 define('MAX_PASSWORD_LENGTH', 100);
 define('MODERN_PASSWORD_WRITES', ($argv[2] ?? '') === 'active');
@@ -20,6 +21,68 @@ class Config
     public const LANGUAGE = 'english';
 }
 $ci = new EA_Controller();
+$kdfRoot = getenv('KDF_TEST_ROOT') ?: (sys_get_temp_dir() . '/accounts-kdf-' . getmypid());
+$kdfCache = $kdfRoot . '/cache';
+$probeMode = $argv[4] ?? '';
+mkdir($kdfCache, 0700, true);
+mkdir(dirname($kdfCache) . '/login-kdf-locks', 0755, true);
+$lockRoot = dirname($kdfCache) . '/login-kdf-locks';
+chmod($lockRoot, 0755);
+$lockOwner = function_exists('posix_geteuid') ? (int) posix_geteuid() : 0;
+$lockGroup = function_exists('posix_getegid') ? (int) posix_getegid() : 0;
+chown($lockRoot, $lockOwner);
+chgrp($lockRoot, $lockGroup);
+$webUid = function_exists('posix_geteuid') ? (int) posix_geteuid() : 0;
+$webGid = function_exists('posix_getegid') ? (int) posix_getegid() : 0;
+$slotUid = $webUid;
+$slotGid = $webGid;
+if ($probeMode === 'cli-default') {
+    $webAccount = function_exists('posix_getpwnam') ? @posix_getpwnam('www-data') : false;
+    $webGroup = function_exists('posix_getgrnam') ? @posix_getgrnam('www-data') : false;
+    if (!is_array($webAccount) || !is_array($webGroup)) {
+        fwrite(STDERR, "www-data account unavailable\n");
+        exit(1);
+    }
+    $slotUid = (int) $webAccount['uid'];
+    $slotGid = (int) $webGroup['gid'];
+}
+if ($probeMode === 'runtime-mismatch') {
+    putenv('EA_LOGIN_KDF_SLOT_UID=' . ($webUid === 0 ? 1 : 0));
+    putenv('EA_LOGIN_KDF_SLOT_GID=' . ($webGid === 0 ? 1 : 0));
+} elseif ($probeMode !== 'cli-default') {
+    putenv('EA_LOGIN_KDF_SLOT_UID=' . $slotUid);
+    putenv('EA_LOGIN_KDF_SLOT_GID=' . $slotGid);
+}
+putenv('EA_LOGIN_KDF_LOCK_ROOT_UID=' . $lockOwner);
+putenv('EA_LOGIN_KDF_LOCK_ROOT_GID=' . $lockGroup);
+for ($slot = 0; $slot < 4; $slot++) {
+    $slotPath = $lockRoot . '/slot-' . $slot . '.lock';
+    touch($slotPath);
+    if (!chown($slotPath, $slotUid) || !chgrp($slotPath, $slotGid)) {
+        fwrite(STDERR, "could not set synthetic slot ownership\n");
+        exit(1);
+    }
+    chmod($slotPath, 0600);
+}
+$hardlinkProbe = $probeMode === 'hardlink';
+if ($hardlinkProbe && !link($lockRoot . '/slot-0.lock', $lockRoot . '/slot-0.alias')) {
+    fwrite(STDERR, "could not create hardlink probe\n");
+    exit(1);
+}
+putenv('EA_LOGIN_KDF_LOCK_ROOT=' . realpath($lockRoot));
+function config_item(string $key): mixed
+{
+    global $kdfCache;
+    return $key === 'cache_path' ? $kdfCache . DIRECTORY_SEPARATOR : null;
+}
+register_shutdown_function(static function () use (&$kdfCache): void {
+    foreach (glob(dirname($kdfCache) . '/login-kdf-locks/*') ?: [] as $path) {
+        @unlink($path);
+    }
+    @rmdir(dirname($kdfCache) . '/login-kdf-locks');
+    @rmdir($kdfCache);
+    @rmdir(dirname($kdfCache));
+});
 function &get_instance(): EA_Controller
 {
     return $GLOBALS['ci'];
@@ -55,9 +118,22 @@ $ci->timezones = new class {
 $format = $argv[1] ?? 'legacy';
 $rotate = ($argv[3] ?? '') === 'reset';
 $mode = $argv[4] ?? '';
+$holdKdfPermits = $mode === 'capacity';
+$holdKdfChild = $mode === 'hold';
 $duplicate = $mode === 'duplicate';
 $ldapLinked = $mode === 'ldap';
 $linkDuringVerify = $mode === 'ldap-transition';
+if ($holdKdfChild) {
+    $permitRoot = dirname($kdfCache) . '/login-kdf-locks';
+    $handles = [];
+    for ($slot = 0; $slot < 4; $slot++) {
+        $handle = fopen($permitRoot . '/slot-' . $slot . '.lock', 'c');
+        flock($handle, LOCK_EX);
+        $handles[] = $handle;
+    }
+    usleep(2000000);
+    exit(0);
+}
 $ci->db = new class ($format, $rotate, $duplicate, $ldapLinked, $linkDuringVerify) {
     public array $row;
     public int $reads = 0;
@@ -169,8 +245,29 @@ $ci->db = new class ($format, $rotate, $duplicate, $ldapLinked, $linkDuringVerif
     }
 };
 require dirname(__DIR__, 2) . '/application/libraries/Accounts.php';
+$heldKdfPermits = [];
+if ($holdKdfPermits) {
+    $permitRoot = dirname($kdfCache) . '/login-kdf-locks';
+    $child = proc_open(
+        [PHP_BINARY, __FILE__, 'legacy', 'reader', 'stable', 'hold'],
+        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $childPipes,
+        null,
+        ['KDF_TEST_ROOT' => $kdfRoot],
+    );
+    usleep(300000);
+}
 $started = hrtime(true);
-$result = (new Accounts())->check_login($mode === 'unknown' ? 'missing' : 'synthetic', 'old-password');
+$capacityDenied = false;
+try {
+    $result = (new Accounts())->check_login($mode === 'unknown' ? 'missing' : 'synthetic', 'old-password');
+} catch (RuntimeException $e) {
+    if ((!$holdKdfPermits && !$hardlinkProbe && $probeMode !== 'runtime-mismatch') || $e->getMessage() !== 'Authentication capacity unavailable.') {
+        throw $e;
+    }
+    $capacityDenied = true;
+    $result = null;
+}
 $elapsedNs = hrtime(true) - $started;
 echo json_encode(
     [
@@ -188,6 +285,10 @@ echo json_encode(
             'old-password',
         ),
         'modern' => str_starts_with($ci->db->row['password'], '$argon2id$'),
+        'capacity_denied' => $capacityDenied,
     ],
     JSON_THROW_ON_ERROR,
 );
+if (is_resource($child ?? null)) {
+    proc_close($child);
+}

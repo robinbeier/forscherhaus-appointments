@@ -149,7 +149,15 @@ class Api
             $api_token = setting('api_token');
             $bearer_token = $this->get_bearer_token();
 
-            if (empty($api_token) || $api_token !== $bearer_token) {
+            // Never use a variable-time comparison for the configured bearer
+            // secret. Empty values must always fall through to Basic auth.
+            $bearer_authorized = is_string($api_token)
+                && $api_token !== ''
+                && is_string($bearer_token)
+                && $bearer_token !== ''
+                && hash_equals($api_token, $bearer_token);
+
+            if (!$bearer_authorized) {
                 // Basic auth.
                 $username = $_SERVER['PHP_AUTH_USER'] ?? null;
 

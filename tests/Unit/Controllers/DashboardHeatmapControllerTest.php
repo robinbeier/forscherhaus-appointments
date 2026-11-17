@@ -113,6 +113,13 @@ class DashboardHeatmapControllerTest extends TestCase
             {
                 return session('role_slug') === $expected_role && (int) session('user_id') > 0;
             }
+
+            protected function beginDashboardRoleGuard(string $expected_role): bool
+            {
+                return session('role_slug') === $expected_role && (int) session('user_id') > 0;
+            }
+            protected function commitDashboardRoleGuard(bool $role_guard): void {}
+            protected function rollbackDashboardRoleGuard(bool $role_guard): void {}
         };
     }
 }
